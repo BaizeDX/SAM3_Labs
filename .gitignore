@@ -151,3 +151,10 @@ Thumbs.db
 # BPE vocabulary files
 *.bpe
 *.vocab
+
+#inputs and outputs
+Inputs/
+Outputs/
+
+#Agent
+codewhale-tui-windows-x64.exe
