@@ -3,1061 +3,826 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SAM 3 Interactive Segmentation</title>
+<title>SAM 3 - ABC Segmentation</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, 'Microsoft YaHei', sans-serif; background: #f5f5f5; color: #333; }
-.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Microsoft YaHei',sans-serif;background:#f5f5f5;color:#333}
+.container{max-width:1500px;margin:0 auto;padding:12px}
+h1{font-size:18px;margin-bottom:8px}
+h1 small{font-size:12px;color:#888;font-weight:400}
 
-h1 { font-size: 20px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-h1 small { font-size: 13px; color: #888; font-weight: normal; }
+/* Mode tabs */
+.mode-tabs{display:flex;gap:0;margin-bottom:8px}
+.mode-tab{padding:8px 20px;border:2px solid #ddd;border-radius:8px 8px 0 0;cursor:pointer;font-size:13px;font-weight:600;background:#fff;border-bottom:2px solid #ddd;transition:all .15s;margin-right:4px}
+.mode-tab.active-a{border-color:#2563eb;border-bottom:2px solid #2563eb;color:#2563eb;background:#eff6ff}
+.mode-tab.active-b{border-color:#16a34a;border-bottom:2px solid #16a34a;color:#16a34a;background:#f0fdf4}
+.mode-tab.active-c{border-color:#dc2626;border-bottom:2px solid #dc2626;color:#dc2626;background:#fef2f2}
 
-/* Top controls */
-.toolbar { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; flex-wrap: wrap;
-            align-items: center; gap: 10px; }
-.toolbar label { font-size: 13px; font-weight: 600; color: #555; display: flex;
-                 align-items: center; gap: 4px; }
-.toolbar select, .toolbar input[type="text"] {
-    padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
-.toolbar input[type="text"] { width: 220px; }
-.btn { padding: 7px 16px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
-       font-weight: 600; transition: opacity 0.15s; }
-.btn:hover { opacity: 0.85; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary { background: #4f46e5; color: #fff; }
-.btn-success { background: #16a34a; color: #fff; }
-.btn-danger { background: #dc2626; color: #fff; }
-.btn-info { background: #2563eb; color: #fff; }
+/* Toolbar */
+.toolbar{background:#fff;border-radius:0 10px 10px 10px;padding:10px 14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.toolbar label{font-size:12px;font-weight:600;color:#555;display:flex;align-items:center;gap:4px}
+.toolbar select,.toolbar input[type="text"]{padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px}
+.toolbar input[type="text"]{width:200px}
+.btn{padding:6px 14px;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-a{background:#2563eb;color:#fff}
+.btn-b{background:#16a34a;color:#fff}
+.btn-c{background:#dc2626;color:#fff}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-outline{background:transparent;border:1px solid #ccc;color:#555}
+.btn-outline:hover{background:#f3f4f6}
 
-/* Main layout */
-.main-grid { display: grid; grid-template-columns: 1fr 380px; gap: 12px; }
+.main-grid{display:grid;grid-template-columns:1fr 350px;gap:10px}
 
-/* Canvas area */
-.canvas-card { background: #fff; border-radius: 10px; padding: 12px;
-               box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-.canvas-card .mode-bar { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; }
-.canvas-card .mode-bar .mode-btn { padding: 5px 14px; border: 2px solid #ddd; border-radius: 6px;
-    background: #fff; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.15s; }
-.canvas-card .mode-bar .mode-btn.active { border-color: #4f46e5; background: #eef2ff; color: #4f46e5; }
-.canvas-card .mode-bar .mode-btn.box-mode.active { border-color: #16a34a; background: #f0fdf4; color: #16a34a; }
-.canvas-card .mode-bar .mode-btn.pos-mode.active { border-color: #16a34a; background: #f0fdf4; color: #16a34a; }
-.canvas-card .mode-bar .mode-btn.neg-mode.active { border-color: #dc2626; background: #fef2f2; color: #dc2626; }
-.canvas-card .mode-bar .mode-btn.negbox-mode.active { border-color: #dc2626; background: #fef2f2; color: #dc2626; }
+/* Canvas */
+.canvas-card{background:#fff;border-radius:10px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.canvas-wrapper{position:relative;display:inline-block}
+#imageCanvas{border:1px solid #e5e7eb;border-radius:6px;cursor:crosshair;display:block;background:#f9fafb}
+.coord-display{position:absolute;bottom:3px;left:5px;background:rgba(0,0,0,.7);color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none}
 
-.canvas-wrapper { position: relative; display: inline-block; }
-#imageCanvas { border: 1px solid #e5e7eb; border-radius: 6px; cursor: crosshair;
-               display: block; max-width: 100%; background: #f9fafb; }
-.canvas-wrapper .coord-display { position: absolute; bottom: 4px; left: 6px;
-    background: rgba(0,0,0,0.7); color: #fff; padding: 2px 8px; border-radius: 4px;
-    font-size: 11px; font-family: monospace; pointer-events: none; }
+/* Right panel */
+.side-panel{display:flex;flex-direction:column;gap:6px}
+.mask-list-card{background:#fff;border-radius:10px;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.08);max-height:520px;overflow-y:auto;display:flex;flex-direction:column}
+.mask-list-card h3{font-size:13px;color:#555;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mask-list-card h3 small{color:#aaa;font-weight:400}
 
-/* Side panel */
-.side-panel { display: flex; flex-direction: column; gap: 10px; }
-.mask-list-card { background: #fff; border-radius: 10px; padding: 12px;
-                  box-shadow: 0 1px 4px rgba(0,0,0,0.08); flex: 1;
-                  max-height: 480px; overflow-y: auto; }
-.mask-list-card h3 { font-size: 14px; margin-bottom: 8px; color: #555; }
-.mask-item { display: flex; align-items: center; padding: 5px 6px; border-radius: 6px;
-             margin-bottom: 3px; transition: background 0.1s; gap: 4px; font-size: 12px; }
-.mask-item:hover { background: #f9fafb; }
-.mask-item .color-dot { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
-.mask-item .mask-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-                        white-space: nowrap; }
-.mask-item .mask-info .inst-id { font-weight: 600; font-size: 12px; }
-.mask-item .mask-info .mask-score { color: #888; margin-left: 4px; }
-.mask-item .mask-info .mask-text { color: #666; font-size: 11px; margin-left: 4px; }
-.mask-item .mask-actions { display: flex; gap: 2px; flex-shrink: 0; }
-.mask-item .mask-actions button { width: 26px; height: 24px; border: 1px solid #e5e7eb;
-    background: #fff; border-radius: 4px; cursor: pointer; font-size: 11px;
-    display: flex; align-items: center; justify-content: center; transition: all 0.1s; }
-.mask-item .mask-actions button:hover { background: #f3f4f6; }
-.mask-item .mask-actions button.refine-btn:hover { background: #eff6ff; border-color: #2563eb; }
-.mask-item .mask-actions button.del-btn:hover { background: #fef2f2; border-color: #dc2626; }
-.mask-empty { color: #aaa; font-size: 13px; text-align: center; padding: 24px; }
+/* Sort bar */
+.sort-bar{display:flex;gap:4px;margin:4px 0;flex-wrap:wrap}
+.sort-btn{padding:2px 8px;border:1px solid #ddd;border-radius:4px;font-size:10px;cursor:pointer;background:#fff;transition:all .15s}
+.sort-btn:hover{background:#f3f4f6}
+.sort-btn.active{background:#eef2ff;border-color:#4f46e5;color:#4f46e5}
 
-.status-card { background: #fff; border-radius: 10px; padding: 10px 14px;
-               box-shadow: 0 1px 4px rgba(0,0,0,0.08); max-height: 140px; overflow-y: auto; }
-.status-card .status-title { font-size: 12px; color: #888; margin-bottom: 4px; }
-.status-card .status-msg { font-size: 13px; color: #333; white-space: pre-wrap; }
+/* Mask list */
+.mask-scroll{flex:1;overflow-y:auto;max-height:380px}
+.section-label{font-size:11px;font-weight:600;color:#888;padding:6px 4px 2px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center}
+.mask-item{display:flex;align-items:center;padding:3px 5px;border-radius:4px;margin-bottom:1px;gap:3px;font-size:11px;cursor:pointer;transition:background .1s}
+.mask-item:hover{background:#f0f0f0}
+.mask-item.highlighted{background:#eef2ff;outline:1px solid #4f46e5}
+.mask-item .color-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.mask-item .mask-info{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mask-item .inst-id{font-weight:600;font-size:11px}
+.mask-item .mode-badge{font-size:9px;padding:1px 4px;border-radius:3px;margin-left:2px}
+.mask-item .mode-a-badge{background:#eff6ff;color:#2563eb}
+.mask-item .mode-b-badge{background:#f0fdf4;color:#16a34a}
+.mask-item .mode-c-badge{background:#fef2f2;color:#dc2626}
+.mask-item .mask-score{color:#888;margin-left:4px}
+.mask-item .mask-actions{display:flex;gap:2px;flex-shrink:0}
+.mask-item .mask-actions button{width:22px;height:20px;border:1px solid #e5e7eb;background:#fff;border-radius:3px;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;transition:all .1s}
+.mask-item .mask-actions button.del-btn:hover{background:#fef2f2;border-color:#dc2626}
+.mask-empty{color:#aaa;font-size:12px;text-align:center;padding:12px}
 
-/* Refinement panel */
-.refine-panel { background: #fff; border-radius: 10px; border: 2px solid #2563eb;
-                padding: 12px; box-shadow: 0 2px 12px rgba(37,99,235,0.15); display: none; }
-.refine-panel.visible { display: block; }
-.refine-panel h3 { font-size: 14px; margin-bottom: 6px; color: #2563eb; }
-.refine-panel .refine-info { font-size: 12px; color: #666; margin-bottom: 8px; }
-.refine-panel .refine-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Prompt chips */
+.prompt-list{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+.prompt-chip{padding:3px 10px;border:1px solid #2563eb;border-radius:12px;font-size:11px;cursor:pointer;transition:all .15s;background:#fff;color:#2563eb}
+.prompt-chip:hover{background:#eff6ff}
+.prompt-chip.selected{background:#2563eb;color:#fff}
 
-/* Checkbox styling */
-.mask-item input[type="checkbox"] { cursor: pointer; width: 16px; height: 16px; flex-shrink: 0; }
+/* Push bar */
+.push-bar{display:flex;gap:4px;padding:4px 0;border-top:1px solid #eee;margin-top:4px}
+.hidden{display:none!important}
 
-@media (max-width: 900px) {
-    .main-grid { grid-template-columns: 1fr; }
-}
+.status-card{background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.status-card .status-title{font-size:11px;color:#888;margin-bottom:2px}
+.status-card .status-msg{font-size:12px;color:#333;white-space:pre-wrap;max-height:60px;overflow-y:auto}
+
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="container">
-    <h1>SAM 3 Interactive Segmentation <small>Lab5 Web Frontend</small></h1>
+<h1>SAM 3 ABC Segmentation <small>A:Text | B:Box+Multi | C:Box+Single</small></h1>
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-        <label>Image: <select id="imgSelect"><option value="">-- Loading --</option></select></label>
-        <label>Text: <input type="text" id="textInput" value="swallowtail ridge" placeholder="Enter object description"></label>
-        <button class="btn btn-success" id="runBtn" disabled>▶ Run Segmentation</button>
-        <button class="btn btn-danger" id="clearBtn">🗑 Clear All</button>
-        <button class="btn btn-primary" id="exportBtn">💾 Export Visible</button>
-        <button class="btn" id="undoBtn" style="background:#f3f4f6;" disabled>↩ Undo</button>
-    </div>
+<div class="mode-tabs">
+<div class="mode-tab active-a" data-mode="a" onclick="switchMode('a')">📝 A: 纯文本</div>
+<div class="mode-tab" data-mode="b" onclick="switchMode('b')">🟦 B: 框+多掩码</div>
+<div class="mode-tab" data-mode="c" onclick="switchMode('c')">🟥 C: 框+单掩码</div>
+</div>
 
-    <!-- Main grid -->
-    <div class="main-grid">
-        <!-- Canvas area -->
-        <div class="canvas-card">
-            <div class="mode-bar">
-                <span style="font-size:13px;font-weight:600;color:#555;margin-right:4px;">Mode:</span>
-                <button class="mode-btn box-mode active" data-mode="box">🟦 Draw Box</button>
-                <button class="mode-btn pos-mode" data-mode="pos">⭐ Add Positive</button>
-                <button class="mode-btn neg-mode" data-mode="neg">❌ Add Negative</button>
-                <button class="mode-btn negbox-mode" data-mode="negbox">🟥 Neg Box</button>
-                <span id="modeHint" style="margin-left:8px;font-size:12px;color:#888;">
-                    Drag on image to draw bounding box
-                </span>
-            </div>
-            <div class="canvas-wrapper">
-                <canvas id="imageCanvas" width="800" height="600"></canvas>
-                <div class="coord-display" id="coordDisplay">x: 0, y: 0</div>
-            </div>
-            <div id="notesDisplay" style="font-size:12px;color:#666;margin-top:6px;"></div>
+<div class="toolbar">
+<label>Image: <select id="imgSelect"><option>--</option></select></label>
+<span id="modeToolbarA"><label>Prompt: <select id="promptSelect"><option>loading</option></select></label></span>
+<span id="modeToolbarBC" class="hidden"><label>Text: <input type="text" id="textInput" value="swallowtail ridge"></label></span>
+<button class="btn btn-a" id="runBtn">▶ Run A</button>
+<button class="btn btn-sm btn-outline" id="clearBtn">🗑 Clear</button>
+<button class="btn btn-sm btn-primary" id="exportBtn">💾 Export</button>
+<span id="modeIndicator" style="font-size:11px;color:#888;margin-left:8px">Mode A</span>
+</div>
+
+<div class="main-grid">
+<div class="canvas-card">
+<div class="canvas-wrapper">
+<canvas id="imageCanvas" width="800" height="600"></canvas>
+<div class="coord-display" id="coordDisplay">x:0 y:0</div>
+<button style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;
+    border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
+    z-index:10;" onclick="openFullSize()">🔍 Full Size</button>
+<button style="position:absolute;top:4px;right:100px;background:rgba(0,0,0,.6);color:#fff;
+    border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
+    z-index:10;" id="labelsToggleBtn" onclick="toggleLabels(this)">🏷 Labels ON</button>
+</div>
+<div id="notesDisplay" style="font-size:11px;color:#666;margin-top:4px"></div>
+<div id="promptChips" class="prompt-list"></div>
+</div>
+
+<div class="side-panel">
+<div class="mask-list-card">
+<h3>
+Masks <small id="maskCount">(0)</small>
+<select id="sortSelect" style="margin-left:auto;font-size:10px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
+<option value="id">Sort: ID#</option>
+<option value="score">Sort: Score</option>
+<option value="mode">Sort: Mode</option>
+</select>
+</h3>
+
+<!-- Batch hide buttons -->
+<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
+<button class="btn btn-sm btn-outline" onclick="hideByMode('a')">Hide A</button>
+<button class="btn btn-sm btn-outline" onclick="hideByMode('b')">Hide B</button>
+<button class="btn btn-sm btn-outline" onclick="hideByMode('c')">Hide C</button>
+<button class="btn btn-sm btn-outline" onclick="hideConfirmed()">Hide Confirmed</button>
+<button class="btn btn-sm btn-outline" onclick="showAllMasks()">Show All</button>
+</div>
+
+<div class="mask-scroll" id="maskListContainer"></div>
+
+<!-- Push to confirmed bar -->
+<div class="push-bar">
+<button class="btn btn-sm btn-a" id="pushBtn" onclick="pushToConfirmed()">📌 Push All Pending</button>
+</div>
+</div>
+
+<div class="status-card">
+<div class="status-title">Status</div>
+<div class="status-msg" id="statusMsg">Ready</div>
+</div>
+</div>
+
+<!-- Full-size modal -->
+<div id="fullSizeModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,.85);z-index:9999;overflow:auto;cursor:zoom-out;
+    justify-content:center;align-items:center;"
+    onclick="closeFullSize()">
+    <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding:20px;cursor:default"
+         onclick="event.stopPropagation()">
+        <div style="position:fixed;top:12px;right:12px;z-index:100">
+            <button style="background:#dc2626;color:#fff;border:none;border-radius:50%;
+                width:36px;height:36px;font-size:20px;cursor:pointer;font-weight:bold;
+                box-shadow:0 2px 8px rgba(0,0,0,.3);"
+                onclick="closeFullSize()">✕</button>
         </div>
-
-        <!-- Side panel -->
-        <div class="side-panel">
-            <!-- Refinement panel (hidden by default) -->
-            <div class="refine-panel" id="refinePanel">
-                <h3>🔄 Refinement Panel</h3>
-                <div class="refine-info" id="refineInfo">
-                    Refining: <span id="refineTarget">-</span> &nbsp;|&nbsp;
-                    ⭐ <span id="refinePosCount">0</span> &nbsp;|&nbsp;
-                    ❌ <span id="refineNegCount">0</span>
-                </div>
-                <div class="refine-actions">
-                    <button class="btn btn-success" id="applyRefineBtn">✅ Apply Refinement</button>
-                    <button class="btn" id="cancelRefineBtn" style="background:#e5e7eb;">↩ Cancel</button>
-                </div>
-            </div>
-
-            <!-- Mask list -->
-            <div class="mask-list-card">
-                <h3>Mask List <small id="maskCount" style="color:#aaa;">(0)</small></h3>
-                <div id="maskList"></div>
-            </div>
-
-            <!-- Status -->
-            <div class="status-card">
-                <div class="status-title">Status</div>
-                <div class="status-msg" id="statusMsg">Ready. Select an image and draw a box.</div>
-            </div>
+        <div style="overflow:hidden;position:relative;margin:0 auto;display:inline-block;
+            border-radius:8px;box-shadow:0 4px 40px rgba(0,0,0,.5);cursor:grab;"
+            id="fsZoomContainer">
+            <canvas id="fullSizeCanvas" style="display:block;border-radius:8px;"></canvas>
+        </div>
+        <div style="text-align:center;margin-top:8px;display:flex;gap:12px;justify-content:center;font-size:12px;color:rgba(255,255,255,.6)">
+            <span>🖱 Scroll to zoom · Drag to pan</span>
+            <button style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;"
+                onclick="toggleFsLabels(this)">🏷 Labels ON</button>
         </div>
     </div>
 </div>
+</div>
+</div>
 
 <script>
-// =====================================================================
-// State
-// =====================================================================
-const state = {
-    images: [],
-    currentImageId: null,
-    imageDataUrl: null,
-    imageWidth: 800,
-    imageHeight: 600,
-    masks: [],            // {id, instance_id, score, mask_data, visible, pts_pos, pts_neg, color}
-    nextMaskId: 0,
-    instanceCounters: {}, // {"swallowtail_ridge": 3}
-    undoStack: [],        // snapshots of masks for undo
-    maxUndo: 20,
-    mode: 'box',          // 'box' | 'pos' | 'neg' | 'negbox'
-
-    // Box drawing
-    isDrawing: false,
-    boxStart: null,
-    boxEnd: null,
-    currentBox: null,     // [x1, y1, x2, y2] positive box
-    currentNegBox: null,  // currently being drawn neg box
-    negBoxes: [],         // accumulated neg boxes [[x1,y1,x2,y2], ...]
-
-    // Refinement
-    refiningMaskId: null,
-    refinePtsPos: [],
-    refinePtsNeg: [],
-
-    // Colors
-    colors: ['#4f46e5','#16a34a','#dc2626','#f59e0b','#0891b2','#db2777',
-             '#65a30d','#ea580c','#7c3aed','#06b6d4'],
-
-    // Canvas display
-    canvasScaleX: 1,
-    canvasScaleY: 1,
+const state={
+    currentImageId:null, imageDataUrl:null, imgW:800, imgH:600,
+    mode:'a',
+    masks:[],        // {id,instance_id,mode,text,score,mask_data,visible,box,color,confirmed}
+    nextMaskId:0,
+    counters:{a:{},b:{},c:{}},
+    isDrawBox:false, boxStart:null, boxEnd:null, currentBox:null,
+    colors:['#2563eb','#16a34a','#dc2626','#f59e0b','#0891b2','#db2777','#65a30d','#ea580c','#7c3aed','#06b6d4'],
+    a_prompts:[],
+    showLabels:true,
+    highlightMaskId:null,
 };
 
-// =====================================================================
-// Utility
-// =====================================================================
-function getScale() {
-    const canvas = document.getElementById('imageCanvas');
-    return {
-        sx: state.imageWidth / canvas.width,
-        sy: state.imageHeight / canvas.height,
-    };
+const canvas=document.getElementById('imageCanvas');
+const ctx=canvas.getContext('2d');
+
+function getScale(){return{sx:state.imgW/canvas.width,sy:state.imgH/canvas.height}}
+function canvasToImg(cx,cy){const s=getScale();return{x:cx*s.sx,y:cy*s.sy}}
+function textToKey(t){return t.replace(/ /g,'_').replace(/-/g,'_').replace(/'/g,'').replace(/"/g,'')}
+
+function getNextId(mode,text){
+    const k=textToKey(text);
+    if(!state.counters[mode][k])state.counters[mode][k]=0;
+    state.counters[mode][k]++;
+    return `${mode.toUpperCase()}_${k}_#${String(state.counters[mode][k]).padStart(2,'0')}`;
 }
 
-function imageToCanvas(ix, iy) {
-    const s = getScale();
-    return { x: ix / s.sx, y: iy / s.sy };
-}
+function getColor(id){return state.colors[id%state.colors.length]}
+function hexToRgb(h){return{r:parseInt(h.slice(1,3),16),g:parseInt(h.slice(3,5),16),b:parseInt(h.slice(5,7),16)}}
+function status(m){document.getElementById('statusMsg').textContent=m}
 
-function canvasToImage(cx, cy) {
-    const s = getScale();
-    return { x: cx * s.sx, y: cy * s.sy };
-}
-
-function getColor(id) {
-    return state.colors[id % state.colors.length];
-}
-
-function getInstanceId(text) {
-    const key = text.replace(/ /g, '_');
-    state.instanceCounters[key] = (state.instanceCounters[key] || 0) + 1;
-    return `${key}#${state.instanceCounters[key]}`;
-}
-
-function status(msg) {
-    document.getElementById('statusMsg').textContent = msg;
-}
-
-// =====================================================================
-// Undo / Redo
-// =====================================================================
-function pushUndo() {
-    const snapshot = {
-        masks: JSON.parse(JSON.stringify(state.masks.map(m => ({
-            id: m.id,
-            instance_id: m.instance_id,
-            text: m.text,
-            score: m.score,
-            mask_data: m.mask_data,
-            visible: m.visible,
-            box: m.box ? [...m.box] : null,
-            pts_pos: m.pts_pos ? [...m.pts_pos] : [],
-            pts_neg: m.pts_neg ? [...m.pts_neg] : [],
-        })))),
-        nextMaskId: state.nextMaskId,
-        instanceCounters: {...state.instanceCounters},
-    };
-    state.undoStack.push(snapshot);
-    if (state.undoStack.length > state.maxUndo) state.undoStack.shift();
-    document.getElementById('undoBtn').disabled = false;
-}
-
-function undo() {
-    if (state.undoStack.length === 0) return;
-    const snap = state.undoStack.pop();
-    state.masks = snap.masks;
-    state.nextMaskId = snap.nextMaskId;
-    state.instanceCounters = snap.instanceCounters;
-    cancelRefinement();
-    if (state.undoStack.length === 0) {
-        document.getElementById('undoBtn').disabled = true;
-    }
-    updateMaskList();
-    fullRedraw();
-    status('↩ Undo: restored previous state');
-}
-
-// =====================================================================
-// API calls
-// =====================================================================
-const API_BASE = '';
-
-async function apiGet(url) {
-    const res = await fetch(API_BASE + url);
-    if (!res.ok) throw new Error(`GET ${url}: ${res.status}`);
-    return res.json();
-}
-
-async function apiPost(url, data) {
-    const res = await fetch(API_BASE + url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error(`POST ${url}: ${res.status}`);
-    return res.json();
+async function apiGet(u){const r=await fetch(u);if(!r.ok)throw new Error(await r.text());return r.json()}
+async function apiPost(u,d){
+    const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
+    if(!r.ok)throw new Error(await r.text());return r.json();
 }
 
 // =====================================================================
 // Canvas drawing
 // =====================================================================
-const canvas = document.getElementById('imageCanvas');
-const ctx = canvas.getContext('2d');
+let _labelEls=[];
 
-function redrawCanvas() {
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-
-    // Background
-    ctx.fillStyle = '#f9fafb';
-    ctx.fillRect(0, 0, W, H);
-
-    // Image
-    if (state.imageDataUrl) {
-        const img = new Image();
-        img.onload = () => {
-            ctx.drawImage(img, 0, 0, W, H);
-
-            // Draw masks
-            const s = getScale();
-            state.masks.forEach(m => {
-                if (!m.visible) return;
-                const maskImg = new Image();
-                maskImg.onload = () => {
-                    // Draw mask as colored overlay
-                    const tempCanvas = document.createElement('canvas');
-                    tempCanvas.width = state.imageWidth;
-                    tempCanvas.height = state.imageHeight;
-                    const tCtx = tempCanvas.getContext('2d');
-
-                    // Draw mask in white
-                    tCtx.drawImage(maskImg, 0, 0, state.imageWidth, state.imageHeight);
-
-                    // Colorize
-                    const imgData = tCtx.getImageData(0, 0, state.imageWidth, state.imageHeight);
-                    const d = imgData.data;
-                    const color = hexToRgb(getColor(m.id));
-                    for (let i = 0; i < d.length; i += 4) {
-                        if (d[i] > 128) {
-                            d[i] = color.r;
-                            d[i+1] = color.g;
-                            d[i+2] = color.b;
-                            d[i+3] = 140; // alpha 0.55
-                        }
-                    }
-                    tCtx.putImageData(imgData, 0, 0);
-
-                    // Draw scaled on main canvas
-                    ctx.drawImage(tempCanvas, 0, 0, W, H);
-                    drawMaskLabels();
-                };
-                maskImg.src = m.mask_data;
-                // Prevent stack issues with multiple masks loading
-                maskImg.onerror = () => {};
-            });
-
-            drawBox();
-            drawRefinePoints();
-            drawMaskLabels();
-        };
-        // Use currentTime to force re-fetch
-        img.src = state.imageDataUrl;
-    }
-
-    drawBox();
-    drawRefinePoints();
-}
-
-function drawBox() {
-    const s = getScale();
-    // Positive box (green)
-    if (state.currentBox) {
-        const [x1, y1, x2, y2] = state.currentBox;
-        const cx1 = x1 / s.sx, cy1 = y1 / s.sy;
-        const cx2 = x2 / s.sx, cy2 = y2 / s.sy;
-        ctx.strokeStyle = '#16a34a';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
-        ctx.strokeRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(22, 163, 74, 0.12)';
-        ctx.fillRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
-    }
-    // Negative boxes (red)
-    state.negBoxes.forEach(nb => {
-        const [x1, y1, x2, y2] = nb;
-        const cx1 = x1 / s.sx, cy1 = y1 / s.sy;
-        const cx2 = x2 / s.sx, cy2 = y2 / s.sy;
-        ctx.strokeStyle = '#dc2626';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.strokeRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(220, 38, 38, 0.1)';
-        ctx.fillRect(cx1, cy1, cx2 - cx1, cy2 - cy1);
-        // Label
-        ctx.fillStyle = '#dc2626';
-        ctx.font = '11px sans-serif';
-        ctx.fillText('NEG', cx1 + 2, cy1 - 2);
-    });
-}
-
-let _drawnLabels = [];
-
-function drawMaskLabels() {
-    // Remove old labels
-    const container = document.querySelector('.canvas-wrapper');
-    _drawnLabels.forEach(el => el.remove());
-    _drawnLabels = [];
-
-    const s = getScale();
-    state.masks.forEach(m => {
-        if (!m.visible) return;
-        // Find center of mask
-        const maskImg = new Image();
-        // For quick label placement, estimate center from score display
-        // Actually, we'll approximate by using the mask data dimensions
-        // Better approach: calculate centroid from the mask pixel data
-        // For now, use a simple approach: compute from mask PNG
-    });
-
-    // Simpler label approach: use the box center as fallback
-    state.masks.forEach(m => {
-        if (!m.visible) return;
-        let cx, cy;
-        if (m.box) {
-            cx = ((m.box[0] + m.box[2]) / 2) / s.sx;
-            cy = ((m.box[1] + m.box[3]) / 2) / s.sy;
-        } else {
-            cx = canvas.width / 2;
-            cy = canvas.height / 2;
+function fullRedraw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    _labelEls.forEach(e=>e.remove());_labelEls=[];
+    if(!state.imageDataUrl){drawBox();return}
+    const img=new Image();
+    img.onload=()=>{
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        // Highlight mask if selected
+        let hlMask=null;
+        if(state.highlightMaskId!==null){
+            hlMask=state.masks.find(m=>m.id===state.highlightMaskId);
         }
-
-        const el = document.createElement('div');
-        el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;transform:translate(-50%,-50%);
-            background:rgba(0,0,0,0.7);color:#fff;padding:1px 6px;border-radius:3px;
-            font-size:11px;font-weight:600;pointer-events:none;z-index:10;
-            white-space:nowrap;`;
-        const num = m.instance_id.split('#')[1] || m.id;
-        el.textContent = `#${num}:${m.score.toFixed(2)}`;
-        container.appendChild(el);
-        _drawnLabels.push(el);
-    });
+        // Draw unselected masks
+        state.masks.forEach(m=>{
+            if(!m.visible)return;
+            if(hlMask&&m.id===hlMask.id)return; // draw highlighted later
+            drawMaskOnCanvas(m);
+        });
+        // Draw highlighted mask on top (brighter)
+        if(hlMask&&hlMask.visible){
+            const mi=new Image();
+            mi.onload=()=>{
+                drawMaskImage(mi,hlMask.color,0.6);
+                // Draw bright border
+                drawHighlightBorder(hlMask);
+                drawAllLabels();
+            };
+            mi.src=hlMask.mask_data;
+        }
+        drawBox();
+        drawAllLabels();
+    };
+    img.src=state.imageDataUrl;
 }
 
-function drawRefinePoints() {
-    if (state.mode !== 'pos' && state.mode !== 'neg') return;
-    const s = getScale();
-
-    state.refinePtsPos.forEach(p => {
-        const cx = p[0] / s.sx, cy = p[1] / s.sy;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 8, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(22, 163, 74, 0.7)';
-        ctx.strokeStyle = '#16a34a';
-        ctx.lineWidth = 2;
-        ctx.fill();
-        ctx.stroke();
-    });
-
-    state.refinePtsNeg.forEach(p => {
-        const cx = p[0] / s.sx, cy = p[1] / s.sy;
-        ctx.strokeStyle = '#dc2626';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(cx - 8, cy - 8);
-        ctx.lineTo(cx + 8, cy + 8);
-        ctx.moveTo(cx + 8, cy - 8);
-        ctx.lineTo(cx - 8, cy + 8);
-        ctx.stroke();
-    });
+function drawMaskOnCanvas(m){
+    const mi=new Image();
+    mi.onload=()=>drawMaskImage(mi,m.color,0.35);
+    mi.src=m.mask_data;
 }
 
-function hexToRgb(hex) {
-    const r = parseInt(hex.slice(1,3), 16);
-    const g = parseInt(hex.slice(3,5), 16);
-    const b = parseInt(hex.slice(5,7), 16);
-    return {r, g, b};
-}
-
-function fullRedraw() {
-    canvas.width = canvas.width; // reset canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (state.imageDataUrl) {
-        const img = new Image();
-        img.onload = () => {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-            // Draw mask overlays
-            const s = getScale();
-            state.masks.forEach(m => {
-                if (!m.visible) return;
-                const maskImg = new Image();
-                maskImg.onload = () => {
-                    const tc = document.createElement('canvas');
-                    tc.width = state.imageWidth;
-                    tc.height = state.imageHeight;
-                    const tctx = tc.getContext('2d');
-                    tctx.drawImage(maskImg, 0, 0, state.imageWidth, state.imageHeight);
-                    const d = tctx.getImageData(0, 0, state.imageWidth, state.imageHeight).data;
-                    const color = hexToRgb(getColor(m.id));
-                    const out = tctx.createImageData(state.imageWidth, state.imageHeight);
-                    for (let i = 0; i < d.length; i += 4) {
-                        if (d[i] > 128) {
-                            out.data[i] = color.r;
-                            out.data[i+1] = color.g;
-                            out.data[i+2] = color.b;
-                            out.data[i+3] = 140;
-                        }
-                    }
-                    tctx.putImageData(out, 0, 0);
-                    ctx.drawImage(tc, 0, 0, canvas.width, canvas.height);
-                };
-                maskImg.src = m.mask_data;
-            });
-
-            drawBox();
-            drawRefinePoints();
-            updateOverlayLabels();
-        };
-        img.src = state.imageDataUrl;
+function drawMaskImage(mi,colorHex,alpha){
+    const tc=document.createElement('canvas');
+    tc.width=state.imgW;tc.height=state.imgH;
+    const tctx=tc.getContext('2d');
+    tctx.drawImage(mi,0,0,state.imgW,state.imgH);
+    const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
+    const c=hexToRgb(colorHex);
+    const out=tctx.createImageData(state.imgW,state.imgH);
+    for(let i=0;i<d.length;i+=4){
+        if(d[i]>128){out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=Math.round(alpha*255);}
     }
-
-    drawBox();
-    drawRefinePoints();
-    updateOverlayLabels();
+    tctx.putImageData(out,0,0);
+    ctx.drawImage(tc,0,0,canvas.width,canvas.height);
 }
 
-function updateOverlayLabels() {
-    const container = document.querySelector('.canvas-wrapper');
-    container.querySelectorAll('.mask-label-overlay').forEach(el => el.remove());
-
-    const s = getScale();
-    state.masks.forEach((m, idx) => {
-        if (!m.visible) return;
-
-        // Use stored centroid if available, otherwise fall back to box center with offset
-        let lx, ly;
-        if (m.centroid) {
-            lx = m.centroid.x / s.sx;
-            ly = m.centroid.y / s.sy;
-        } else {
-            // Fallback: box center + per-mask offset to avoid overlapping
-            if (m.box) {
-                lx = ((m.box[0] + m.box[2]) / 2) / s.sx;
-                ly = ((m.box[1] + m.box[3]) / 2) / s.sy;
-            } else {
-                lx = canvas.width / 2;
-                ly = canvas.height / 2;
+function drawHighlightBorder(m){
+    // Compute centroid from mask data
+    const mi=new Image();
+    mi.onload=()=>{
+        const tc=document.createElement('canvas');tc.width=state.imgW;tc.height=state.imgH;
+        const tctx=tc.getContext('2d');tctx.drawImage(mi,0,0,state.imgW,state.imgH);
+        const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
+        const s=getScale();
+        let sx=0,sy=0,count=0;
+        let minX=state.imgW,minY=state.imgH,maxX=0,maxY=0;
+        for(let y=0;y<state.imgH;y++){for(let x=0;x<state.imgW;x++){
+            const idx=(y*state.imgW+x)*4;
+            if(d[idx]>128){
+                sx+=x;sy+=y;count++;
+                if(x<minX)minX=x;if(y<minY)minY=y;if(x>maxX)maxX=x;if(y>maxY)maxY=y;
             }
-            // Cascade offset for masks sharing the same box
-            const num = parseInt(m.instance_id.split('#')[1]) || m.id;
-            ly += (num % 10) * 18;
+        }}
+        if(count>0){
+            // Draw bounding box highlight
+            ctx.strokeStyle='#4f46e5';ctx.lineWidth=2;
+            ctx.strokeRect(minX/s.sx,minY/s.sy,(maxX-minX)/s.sx,(maxY-minY)/s.sy);
+            // Draw cross at centroid
+            const cx=(sx/count)/s.sx,cy=(sy/count)/s.sy;
+            ctx.strokeStyle='#4f46e5';ctx.lineWidth=1.5;
+            ctx.beginPath();ctx.moveTo(cx-8,cy);ctx.lineTo(cx+8,cy);ctx.moveTo(cx,cy-8);ctx.lineTo(cx,cy+8);ctx.stroke();
         }
+    };
+    mi.src=m.mask_data;
+}
 
-        const el = document.createElement('div');
-        el.className = 'mask-label-overlay';
-        el.style.cssText = `left:${lx}px;top:${ly}px;position:absolute;transform:translate(-50%,-50%);
-            background:rgba(0,0,0,0.7);color:#fff;padding:1px 6px;border-radius:3px;
-            font-size:11px;font-weight:600;pointer-events:none;z-index:10;white-space:nowrap;`;
-        const num = m.instance_id.split('#')[1] || m.id;
-        el.textContent = `#${num}:${m.score.toFixed(2)}`;
-        container.appendChild(el);
+function drawBox(){
+    if(!state.currentBox)return;
+    const s=getScale();const[x1,y1,x2,y2]=state.currentBox;
+    const cx1=x1/s.sx,cy1=y1/s.sy,cx2=x2/s.sx,cy2=y2/s.sy;
+    const color=state.mode==='c'?'#dc2626':'#16a34a';
+    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([6,4]);
+    ctx.strokeRect(cx1,cy1,cx2-cx1,cy2-cy1);ctx.setLineDash([]);
+}
+
+function computeCentroid(maskDataUrl){
+    // Decode base64 mask PNG and compute pixel centroid
+    const tc=document.createElement('canvas');
+    const tctx=tc.getContext('2d');
+    return new Promise(resolve=>{
+        const mi=new Image();
+        mi.onload=()=>{
+            tc.width=mi.width;tc.height=mi.height;
+            tctx.drawImage(mi,0,0);
+            const d=tctx.getImageData(0,0,mi.width,mi.height).data;
+            let sx=0,sy=0,count=0;
+            for(let y=0;y<mi.height;y++){for(let x=0;x<mi.width;x++){
+                if(d[(y*mi.width+x)*4]>128){sx+=x;sy+=y;count++;}
+            }}
+            resolve(count>0?{x:sx/count,y:sy/count}:null);
+        };
+        mi.src=maskDataUrl;
     });
+}
+
+let _fsShowLabels=true,_fsZoom=1,_fsPanX=0,_fsPanY=0,_fsDragging=false,_fsDragStartX=0,_fsDragStartY=0;
+
+function toggleFsLabels(btn){
+    _fsShowLabels=!_fsShowLabels;
+    btn.textContent=_fsShowLabels?'🏷 Labels ON':'🏷 Labels OFF';
+    btn.style.opacity=_fsShowLabels?'1':'0.5';
+    _fsRedrawLabels();
+}
+
+function _fsRedrawLabels(){
+    const fc=document.getElementById('fullSizeCanvas');
+    const fctx=fc.getContext('2d');
+    // Reload original image and redraw all content with current label setting
+    const img=new Image();
+    img.onload=()=>{
+        fctx.drawImage(img,0,0);
+        let drawCount=0;
+        const visMasks=state.masks.filter(x=>x.visible);
+        if(visMasks.length===0)return;
+        visMasks.forEach(m=>{
+            if(!m.visible)return;
+            const mi=new Image();
+            mi.onload=()=>{
+                const tc=document.createElement('canvas');
+                tc.width=state.imgW;tc.height=state.imgH;
+                const tctx=tc.getContext('2d');
+                tctx.drawImage(mi,0,0,state.imgW,state.imgH);
+                const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
+                const c=hexToRgb(m.color);
+                const out=tctx.createImageData(state.imgW,state.imgH);
+                for(let i=0;i<d.length;i+=4){
+                    if(d[i]>128){out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=150;}
+                }
+                tctx.putImageData(out,0,0);
+                fctx.drawImage(tc,0,0);
+                if(m._centroid&&_fsShowLabels){
+                    fctx.font='bold 14px sans-serif';
+                    fctx.textAlign='center';fctx.textBaseline='middle';
+                    const tx=m._centroid.x,ty=m._centroid.y;
+                    fctx.fillStyle='rgba(0,0,0,.7)';
+                    const tw=fctx.measureText(m.instance_id).width;
+                    fctx.fillRect(tx-tw/2-4,ty-10,tw+8,20);
+                    fctx.fillStyle='#fff';
+                    fctx.fillText(m.instance_id,tx,ty);
+                }
+                drawCount++;
+            };
+            mi.src=m.mask_data;
+        });
+    };
+    img.src=state.imageDataUrl;
+}
+
+async function drawAllLabels(){
+    if(!state.showLabels)return;
+    const s=getScale();const container=document.querySelector('.canvas-wrapper');
+    const positions=[]; // [{id, x, y, text}]
+    for(const m of state.masks){
+        if(!m.visible)continue;
+        // Compute centroid if not cached
+        if(!m._centroid){
+            const c=await computeCentroid(m.mask_data);
+            if(!c)continue;
+            m._centroid=c;
+        }
+        const lx=m._centroid.x/s.sx;
+        const ly=m._centroid.y/s.sy;
+        // Offset if overlapping
+        let ox=lx,oy=ly;
+        let offset=12;
+        while(positions.some(p=>Math.abs(p.x-ox)<18&&Math.abs(p.y-oy)<14)){
+            ox=lx+((Math.random()-0.5)*offset);
+            oy=ly-((Math.random()-0.5)*offset);
+            offset+=6;
+        }
+        positions.push({id:m.id,x:ox,y:oy});
+        const el=document.createElement('div');
+        el.style.cssText=`left:${ox}px;top:${oy}px;position:absolute;transform:translate(-50%,-50%);
+            background:rgba(0,0,0,.7);color:#fff;padding:1px 5px;border-radius:3px;
+            font-size:10px;font-weight:600;pointer-events:none;z-index:10;white-space:nowrap;`;
+        el.textContent=m.instance_id;
+        if(state.highlightMaskId===m.id){
+            el.style.background='#4f46e5';el.style.fontSize='12px';
+            el.style.zIndex='11';
+        }
+        container.appendChild(el);_labelEls.push(el);
+    }
 }
 
 // =====================================================================
 // Canvas mouse events
 // =====================================================================
-
-canvas.addEventListener('mousedown', (e) => {
-    if (state.mode !== 'box' && state.mode !== 'negbox') return;
-    const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    state.isDrawing = true;
-    state.boxStart = {x: cx, y: cy};
-    state.boxEnd = {x: cx, y: cy};
+canvas.addEventListener('mousedown',e=>{
+    if(state.mode==='a')return;
+    const r=canvas.getBoundingClientRect();
+    state.isDrawBox=true;
+    state.boxStart={x:e.clientX-r.left,y:e.clientY-r.top};
+    state.boxEnd={x:e.clientX-r.left,y:e.clientY-r.top};
 });
-
-canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-
-    // Update coord display
-    const img = canvasToImage(cx, cy);
-    document.getElementById('coordDisplay').textContent =
-        `x: ${Math.round(img.x)}, y: ${Math.round(img.y)}`;
-
-    if (state.isDrawing && state.boxStart) {
-        state.boxEnd = {x: cx, y: cy};
-        // Draw preview
+canvas.addEventListener('mousemove',e=>{
+    const r=canvas.getBoundingClientRect();
+    const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    const img=canvasToImg(cx,cy);
+    document.getElementById('coordDisplay').textContent=`x:${Math.round(img.x)} y:${Math.round(img.y)}`;
+    if(state.isDrawBox&&state.boxStart){
+        state.boxEnd={x:cx,y:cy};
+        const s=getScale();
+        state.currentBox=[
+            Math.min(state.boxStart.x,state.boxEnd.x)*s.sx,
+            Math.min(state.boxStart.y,state.boxEnd.y)*s.sy,
+            Math.max(state.boxStart.x,state.boxEnd.x)*s.sx,
+            Math.max(state.boxStart.y,state.boxEnd.y)*s.sy];
         fullRedraw();
-        const s = getScale();
-        const x1 = Math.min(state.boxStart.x, state.boxEnd.x) * s.sx;
-        const y1 = Math.min(state.boxStart.y, state.boxEnd.y) * s.sy;
-        const x2 = Math.max(state.boxStart.x, state.boxEnd.x) * s.sx;
-        const y2 = Math.max(state.boxStart.y, state.boxEnd.y) * s.sy;
-        // Draw temp box (always in image coords for consistency)
-        const _bx1 = Math.min(state.boxStart.x, state.boxEnd.x);
-        const _by1 = Math.min(state.boxStart.y, state.boxEnd.y);
-        const _bx2 = Math.max(state.boxStart.x, state.boxEnd.x);
-        const _by2 = Math.max(state.boxStart.y, state.boxEnd.y);
-        state.currentBox = [
-            Math.min(state.boxStart.x, state.boxEnd.x) * s.sx,
-            Math.min(state.boxStart.y, state.boxEnd.y) * s.sy,
-            Math.max(state.boxStart.x, state.boxEnd.x) * s.sx,
-            Math.max(state.boxStart.y, state.boxEnd.y) * s.sy
-        ];
-    } else if (state.mode === 'pos') {
-        canvas.style.cursor = 'cell';
-    } else if (state.mode === 'neg') {
-        canvas.style.cursor = 'cell';
-    } else {
-        canvas.style.cursor = 'crosshair';
     }
 });
-
-canvas.addEventListener('mouseup', (e) => {
-    if (!state.isDrawing) return;
-    state.isDrawing = false;
-    const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    state.boxEnd = {x: cx, y: cy};
-
-    const s = getScale();
-    const bx1 = Math.min(state.boxStart.x, state.boxEnd.x) * s.sx;
-    const by1 = Math.min(state.boxStart.y, state.boxEnd.y) * s.sy;
-    const bx2 = Math.max(state.boxStart.x, state.boxEnd.x) * s.sx;
-    const by2 = Math.max(state.boxStart.y, state.boxEnd.y) * s.sy;
-
-    if (Math.abs(bx2 - bx1) < 5 || Math.abs(by2 - by1) < 5) {
-        // Too small, ignore
-        fullRedraw();
-        return;
-    }
-
-    if (state.mode === 'negbox') {
-        state.negBoxes.push([bx1, by1, bx2, by2]);
-        status(`Neg box added: (${Math.round(bx1)},${Math.round(by1)}) to (${Math.round(bx2)},${Math.round(by2)}). Total: ${state.negBoxes.length}`);
-    } else {
-        state.currentBox = [bx1, by1, bx2, by2];
-        document.getElementById('runBtn').disabled = false;
-        status(`Box set: (${Math.round(bx1)},${Math.round(by1)}) to (${Math.round(bx2)},${Math.round(by2)}).
-            Enter text prompt and click Run Segmentation.`);
-    }
+canvas.addEventListener('mouseup',e=>{
+    if(!state.isDrawBox)return;
+    state.isDrawBox=false;
+    const s=getScale();
+    const bx1=Math.min(state.boxStart.x,state.boxEnd.x)*s.sx;
+    const by1=Math.min(state.boxStart.y,state.boxEnd.y)*s.sy;
+    const bx2=Math.max(state.boxStart.x,state.boxEnd.x)*s.sx;
+    const by2=Math.max(state.boxStart.y,state.boxEnd.y)*s.sy;
+    if(Math.abs(bx2-bx1)<5||Math.abs(by2-by1)<5){state.currentBox=null;fullRedraw();return;}
+    state.currentBox=[bx1,by1,bx2,by2];
     fullRedraw();
+    status(`Box: (${Math.round(bx1)},${Math.round(by1)})-(${Math.round(bx2)},${Math.round(by2)})`);
 });
+canvas.addEventListener('mouseleave',()=>{state.isDrawBox=false;});
 
-canvas.addEventListener('click', (e) => {
-    if (state.mode === 'pos' || state.mode === 'neg') {
-        const rect = canvas.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
-        const img = canvasToImage(cx, cy);
-        const ix = Math.round(img.x);
-        const iy = Math.round(img.y);
+// =====================================================================
+// Mode switching
+// =====================================================================
+function switchMode(mode){
+    state.mode=mode;
+    document.querySelectorAll('.mode-tab').forEach(t=>{
+        t.classList.remove('active-a','active-b','active-c');
+        if(t.dataset.mode===mode)t.classList.add(`active-${mode}`);
+    });
+    document.getElementById('modeToolbarA').classList.toggle('hidden',mode!=='a');
+    document.getElementById('modeToolbarBC').classList.toggle('hidden',mode==='a');
+    const runBtn=document.getElementById('runBtn');
+    runBtn.className=`btn btn-${mode}`;
+    const labels={a:'▶ Run A (Text)',b:'▶ Run B (Multi)',c:'▶ Run C (Single)'};
+    runBtn.textContent=labels[mode];
+    const ind={a:'Mode A: Pure Text',b:'Mode B: Box+Multi-Mask',c:'Mode C: Box+Single-Mask'};
+    document.getElementById('modeIndicator').textContent=ind[mode];
+    canvas.style.cursor=mode==='a'?'default':'crosshair';
+    status(`Switched to ${ind[mode]}`);
+}
 
-        if (ix < 0 || iy < 0 || ix >= state.imageWidth || iy >= state.imageHeight) return;
-
-        if (state.mode === 'pos') {
-            state.refinePtsPos.push([ix, iy]);
-        } else {
-            state.refinePtsNeg.push([ix, iy]);
-        }
-        updateRefineInfo();
-        status(`Added ${state.mode === 'pos' ? 'positive' : 'negative'} point at (${ix}, ${iy})`);
-        fullRedraw();
-    }
-});
-
-// Canvas leave - stop drawing
-canvas.addEventListener('mouseleave', () => {
-    state.isDrawing = false;
+function toggleLabels(btn){
+    state.showLabels=!state.showLabels;
+    btn.textContent=state.showLabels?'🏷 Labels ON':'🏷 Labels OFF';
+    btn.style.opacity=state.showLabels?'1':'0.5';
     fullRedraw();
-});
+}
 
 // =====================================================================
-// Mode buttons
+// Image / prompt loading
 // =====================================================================
-document.querySelectorAll('.mode-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.mode = btn.dataset.mode;
+async function loadImages(){
+    const d=await apiGet('/api/images');
+    const sel=document.getElementById('imgSelect');sel.innerHTML='';
+    d.images.forEach(i=>{const o=document.createElement('option');o.value=i.id;o.textContent=i.id;sel.appendChild(o)});
+    if(d.images.length>0){sel.value=d.images[0].id;await loadImage(d.images[0].id)}
+}
+async function loadImage(id){
+    const d=await apiGet(`/api/image/${id}`);
+    state.currentImageId=id;state.imageDataUrl=d.data_url;state.imgW=d.width;state.imgH=d.height;
+    const sc=Math.min(800/d.width,600/d.height);
+    canvas.width=Math.round(d.width*sc);canvas.height=Math.round(d.height*sc);
+    state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{}};state.currentBox=null;state.highlightMaskId=null;
+    updateMaskList();fullRedraw();status(`Loaded: ${id}`);
+    loadPrompts();
+}
+document.getElementById('imgSelect').addEventListener('change',e=>{if(e.target.value)loadImage(e.target.value)});
 
-        const hints = {
-            box: 'Drag on image to draw bounding box',
-            pos: 'Click on image to add positive points (green, expands mask)',
-            neg: 'Click on image to add negative points (red, shrinks mask)',
-            negbox: 'Drag on image to draw negative/exclusion box (red)',
-        };
-        document.getElementById('modeHint').textContent = hints[state.mode] || '';
+async function loadPrompts(){
+    const d=await apiGet('/api/config-prompts');
+    state.a_prompts=d.prompts;
+    const sel=document.getElementById('promptSelect');sel.innerHTML='';
+    d.prompts.forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o)});
+    const chips=document.getElementById('promptChips');chips.innerHTML='';
+    d.prompts.forEach(p=>{
+        const c=document.createElement('span');c.className='prompt-chip';c.textContent=p;
+        c.onclick=()=>{document.querySelectorAll('.prompt-chip').forEach(x=>x.classList.remove('selected'));c.classList.add('selected');document.getElementById('promptSelect').value=p};
+        chips.appendChild(c);
     });
-});
-
-// =====================================================================
-// Image loading
-// =====================================================================
-
-async function loadImages() {
-    try {
-        const data = await apiGet('/api/images');
-        state.images = data.images;
-        const sel = document.getElementById('imgSelect');
-        sel.innerHTML = '';
-        data.images.forEach(img => {
-            const opt = document.createElement('option');
-            opt.value = img.id;
-            opt.textContent = img.id;
-            sel.appendChild(opt);
-        });
-        if (data.images.length > 0) sel.value = data.images[0].id;
-        await loadImage(sel.value);
-        status(`Loaded ${data.images.length} images. Select an image and draw a box.`);
-    } catch (e) {
-        status('Error loading images: ' + e.message);
-    }
+    if(d.prompts.length>0){chips.firstChild.classList.add('selected');document.getElementById('promptSelect').value=d.prompts[0]}
 }
 
-async function loadImage(imgId) {
-    try {
-        const data = await apiGet(`/api/image/${imgId}`);
-        state.currentImageId = imgId;
-        state.imageDataUrl = data.data_url;
-        state.imageWidth = data.width;
-        state.imageHeight = data.height;
-
-        // Scale canvas to match aspect ratio
-        const maxW = 800, maxH = 600;
-        const scale = Math.min(maxW / data.width, maxH / data.height);
-        canvas.width = Math.round(data.width * scale);
-        canvas.height = Math.round(data.height * scale);
-
-        // Reset state for new image
-        state.masks = [];
-        state.nextMaskId = 0;
-        state.instanceCounters = {};
-        state.currentBox = null;
-        state.refiningMaskId = null;
-        state.refinePtsPos = [];
-        state.refinePtsNeg = [];
-        document.getElementById('runBtn').disabled = true;
-
-        const notes = data.notes || {};
-        document.getElementById('notesDisplay').innerHTML =
-            Object.entries(notes).filter(([k,v]) => v).map(([k,v]) => `<span>• ${k}: ${v}</span>`).join(' | ');
-
-        updateMaskList();
-        updateRefineInfo();
-        document.getElementById('refinePanel').classList.remove('visible');
-        fullRedraw();
-    } catch (e) {
-        status('Error loading image: ' + e.message);
-    }
-}
-
-document.getElementById('imgSelect').addEventListener('change', (e) => {
-    if (e.target.value) loadImage(e.target.value);
-});
-
 // =====================================================================
-// Segmentation
+// Run segmentation
 // =====================================================================
-
-document.getElementById('runBtn').addEventListener('click', async () => {
-    if (!state.currentImageId || !state.currentBox) {
-        status('Please select an image and draw a box first.');
-        return;
+document.getElementById('runBtn').addEventListener('click',async()=>{
+    if(!state.currentImageId){status('Select image first.');return;}
+    const mode=state.mode;
+    let text='';
+    if(mode==='a'){text=document.getElementById('promptSelect').value;if(!text){status('Select prompt.');return}}
+    else{
+        text=document.getElementById('textInput').value.trim();
+        if(!text){status('Enter text.');return}
+        if(!state.currentBox){status('Draw a box first.');return}
     }
-    const text = document.getElementById('textInput').value.trim();
-    if (!text) { status('Please enter a text prompt.'); return; }
-
-    // Capture box at request time (before async, avoid timing issues)
-    const capturedBox = [...state.currentBox];
-
-    document.getElementById('runBtn').disabled = true;
-    status(`⏳ Running segmentation: "${text}"...`);
-
-    try {
-        const data = await apiPost('/api/segment', {
-            image_id: state.currentImageId,
-            text: text,
-            box: capturedBox,
-            instance_counter: state.instanceCounters[text.replace(/ /g,'_')] || 0,
-        });
-
-        data.masks.forEach(m => {
-            const instId = m.instance_id;
-            const entry = {
-                id: state.nextMaskId++,
-                instance_id: instId,
-                text: text,
-                score: m.score,
-                mask_data: m.mask_data,
-                visible: true,
-                box: [...capturedBox],
-                pts_pos: [],
-                pts_neg: [],
-                neg_boxes: state.negBoxes.length > 0 ? [...state.negBoxes.map(b=>[...b])] : [],
-                centroid: null,
-            };
-            state.masks.push(entry);
-            // Compute mask centroid asynchronously for label placement
-            (function(maskEntry, maskDataUrl) {
-                const ci = new Image();
-                ci.onload = () => {
-                    const tc = document.createElement('canvas');
-                    tc.width = state.imageWidth;
-                    tc.height = state.imageHeight;
-                    const tcx = tc.getContext('2d');
-                    tcx.drawImage(ci, 0, 0);
-                    const d = tcx.getImageData(0, 0, state.imageWidth, state.imageHeight).data;
-                    let sx = 0, sy = 0, cnt = 0;
-                    for (let y = 0; y < state.imageHeight; y++) {
-                        for (let x = 0; x < state.imageWidth; x++) {
-                            if (d[(y * state.imageWidth + x) * 4] > 128) {
-                                sx += x; sy += y; cnt++;
-                            }
-                        }
-                    }
-                    if (cnt > 0) {
-                        maskEntry.centroid = {x: sx / cnt, y: sy / cnt};
-                        updateOverlayLabels();
-                    }
-                };
-                ci.src = maskDataUrl;
-            })(entry, m.mask_data);
-        });
-
-        status(`✅ Added ${data.masks.length} masks. Total: ${state.masks.length}`);
-        updateMaskList();
-        fullRedraw();
-    } catch (e) {
-        status('❌ Segmentation failed: ' + e.message);
-    }
-    document.getElementById('runBtn').disabled = false;
-});
-
-// =====================================================================
-// Mask management
-// =====================================================================
-
-function updateMaskList() {
-    const container = document.getElementById('maskList');
-    const count = document.getElementById('maskCount');
-    count.textContent = `(${state.masks.length})`;
-
-    if (state.masks.length === 0) {
-        container.innerHTML = '<div class="mask-empty">No masks yet. Draw a box and run segmentation.</div>';
-        return;
-    }
-
-    let html = '';
-    state.masks.forEach(m => {
-        const num = m.instance_id.split('#')[1] || m.id;
-        const color = getColor(m.id);
-        const checked = m.visible ? 'checked' : '';
-        const isRefining = state.refiningMaskId === m.id;
-
-        html += `<div class="mask-item" data-id="${m.id}">
-            <input type="checkbox" ${checked} class="mask-visibility">
-            <span class="color-dot" style="background:${color}"></span>
-            <div class="mask-info">
-                <span class="inst-id">${m.instance_id}</span>
-                <span class="mask-score">${m.score.toFixed(3)}</span>
-                <span class="mask-text">${m.text}</span>
-            </div>
-            <div class="mask-actions">
-                ${isRefining ? '<span style="font-size:11px;color:#2563eb;padding:0 4px;">🔧</span>'
-                    : `<button class="refine-btn" data-id="${m.id}" title="Refine">🔄</button>`}
-                <button class="del-btn" data-id="${m.id}" title="Delete">🗑</button>
-            </div>
-        </div>`;
-    });
-    container.innerHTML = html;
-
-    // Bind events
-    container.querySelectorAll('.mask-visibility').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-            const id = parseInt(e.target.closest('.mask-item').dataset.id);
-            const m = state.masks.find(x => x.id === id);
-            if (m) { m.visible = e.target.checked; fullRedraw(); }
-        });
-    });
-
-    container.querySelectorAll('.refine-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const id = parseInt(btn.dataset.id);
-            startRefinement(id);
-        });
-    });
-
-    container.querySelectorAll('.del-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const id = parseInt(btn.dataset.id);
-            deleteMask(id);
-        });
-    });
-}
-
-function deleteMask(id) {
-    state.masks = state.masks.filter(m => m.id !== id);
-    if (state.refiningMaskId === id) {
-        cancelRefinement();
-    }
-    updateMaskList();
-    fullRedraw();
-    status(`Deleted mask #${id}`);
-}
-
-document.getElementById('clearBtn').addEventListener('click', () => {
-    pushUndo();
-    state.masks = [];
-    state.nextMaskId = 0;
-    state.instanceCounters = {};
-    state.negBoxes = [];
-    cancelRefinement();
-    updateMaskList();
-    fullRedraw();
-    status('Cleared all masks');
-});
-
-// =====================================================================
-// Refinement
-// =====================================================================
-
-function startRefinement(id) {
-    const m = state.masks.find(x => x.id === id);
-    if (!m) return;
-
-    state.refiningMaskId = id;
-    state.refinePtsPos = [...m.pts_pos];
-    state.refinePtsNeg = [...m.pts_neg];
-
-    document.getElementById('refinePanel').classList.add('visible');
-    document.getElementById('refineTarget').textContent = `${m.instance_id} (score: ${m.score.toFixed(3)})`;
-    updateRefineInfo();
-    updateMaskList();
-    status(`Refinement mode: add positive/negative points on image, then Apply.`);
-}
-
-function cancelRefinement() {
-    state.refiningMaskId = null;
-    state.refinePtsPos = [];
-    state.refinePtsNeg = [];
-    document.getElementById('refinePanel').classList.remove('visible');
-    updateMaskList();
-}
-
-document.getElementById('cancelRefineBtn').addEventListener('click', cancelRefinement);
-
-document.getElementById('applyRefineBtn').addEventListener('click', async () => {
-    if (state.refiningMaskId === null) return;
-    const m = state.masks.find(x => x.id === state.refiningMaskId);
-    if (!m) return;
-
-    // Deduplicate
-    const posSet = [...new Map(state.refinePtsPos.map(p => [p.join(','), p])).values()];
-    const negSet = [...new Map(state.refinePtsNeg.map(p => [p.join(','), p])).values()];
-    const overlap = posSet.filter(p => negSet.some(n => n[0]===p[0] && n[1]===p[1]));
-    const finalPos = posSet.filter(p => !overlap.includes(p));
-    const finalNeg = negSet.filter(p => !overlap.includes(p));
-
-    if (finalPos.length === 0 && finalNeg.length === 0 && m.neg_boxes.length === 0 && state.negBoxes.length === 0) {
-        status('⚠️ Please add at least one refinement point or negative box.');
-        return;
-    }
-
-    // Combine original neg_boxes with newly drawn ones
-    allNegBoxes = [...(m.neg_boxes || []), ...state.negBoxes];
-
-    status(`⏳ Refining mask #${m.id}... pos=${finalPos.length}, neg=${finalNeg.length}, neg_boxes=${allNegBoxes.length}`);
-
-    try {
-        const data = await apiPost('/api/refine', {
-            image_id: state.currentImageId,
-            text: m.text,
-            box: m.box,
-            pts_pos: finalPos,
-            pts_neg: finalNeg,
-            neg_boxes: allNegBoxes.length > 0 ? allNegBoxes : null,
-        });
-
-        m.mask_data = data.mask_data;
-        m.score = data.score;
-        m.pts_pos = finalPos;
-        m.pts_neg = finalNeg;
-        m.neg_boxes = allNegBoxes;
-
-        // Show candidate masks if available
-        if (data.candidates && data.candidates.length > 0) {
-            let canHtml = '<div style="font-size:12px;margin:6px 0;"><b>Other candidates:</b><br>';
-            data.candidates.forEach((c, ci) => {
-                const w = Math.min(120, state.imageWidth / 4);
-                canHtml += `<img src="${c.mask_data}" style="width:${w}px;margin:2px;border:1px solid #ddd;border-radius:4px;cursor:pointer;" title="score: ${c.score.toFixed(3)}" data-ci="${ci}"> `;
+    const runBtn=document.getElementById('runBtn');runBtn.disabled=true;
+    status(`⏳ Running ${mode.toUpperCase()}... "${text}"`);
+    try{
+        let data;
+        if(mode==='a')data=await apiPost('/api/segment-a',{image_id:state.currentImageId,text});
+        else if(mode==='b')data=await apiPost('/api/segment-b',{image_id:state.currentImageId,text,box:state.currentBox});
+        else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox});
+        (data.masks||[]).forEach(m=>{
+            state.masks.push({
+                id:state.nextMaskId++,instance_id:getNextId(mode,text),
+                mode:mode.toUpperCase(),text,score:m.score,
+                mask_data:m.mask_data,visible:true,box:state.currentBox?[...state.currentBox]:null,
+                color:getColor(state.nextMaskId),confirmed:false,
             });
-            canHtml += '</div>';
-            // We'll show candidates in a temporary output, but primarily use the current refine result
-            setTimeout(() => {
-                status(`✅ Refinement done. Score: ${data.score.toFixed(3)}`);
-            }, 100);
-        }
-
-        state.refiningMaskId = null;
-        state.refinePtsPos = [];
-        state.refinePtsNeg = [];
-        state.negBoxes = [];
-        document.getElementById('refinePanel').classList.remove('visible');
-
-        status(`✅ Refinement complete. New score: ${data.score.toFixed(3)}`);
-        updateMaskList();
-        fullRedraw();
-    } catch (e) {
-        status('❌ Refinement failed: ' + e.message);
-    }
+        });
+        status(`✅ ${mode.toUpperCase()}: ${data.masks.length} masks (pending). Total: ${state.masks.length}`);
+        updateMaskList();fullRedraw();
+    }catch(e){status('❌ '+e.message)}
+    runBtn.disabled=false;
 });
 
-function updateRefineInfo() {
-    document.getElementById('refinePosCount').textContent = state.refinePtsPos.length;
-    document.getElementById('refineNegCount').textContent = state.refinePtsNeg.length;
+// =====================================================================
+// Sort masks
+// =====================================================================
+function getSortedMasks(){
+    const order=document.getElementById('sortSelect').value;
+    const copy=[...state.masks];
+    if(order==='id')copy.sort((a,b)=>a.id-b.id);
+    else if(order==='score')copy.sort((a,b)=>a.score-b.score);
+    else if(order==='mode')copy.sort((a,b)=>a.mode.localeCompare(b.mode)||a.id-b.id);
+    return copy;
 }
 
 // =====================================================================
-// Export
+// Mask list rendering
 // =====================================================================
-
-document.getElementById('exportBtn').addEventListener('click', async () => {
-    const visible = state.masks.filter(m => m.visible);
-    if (visible.length === 0) {
-        status('No visible masks to export.');
-        return;
+function updateMaskList(){
+    const container=document.getElementById('maskListContainer');
+    document.getElementById('maskCount').textContent=`(${state.masks.length})`;
+    if(state.masks.length===0){
+        container.innerHTML='<div class="mask-empty">No masks yet.</div>';return;
     }
-
-    status(`⏳ Exporting ${visible.length} masks...`);
-
-    try {
-        const data = await apiPost('/api/export', {
-            image_id: state.currentImageId,
-            masks: visible.map(m => ({
-                id: m.id,
-                instance_id: m.instance_id,
-                score: m.score,
-                mask_data: m.mask_data,
-            })),
+    // Check if there are pending masks
+    const hasPending=state.masks.some(m=>!m.confirmed);
+    
+    const sorted=getSortedMasks();
+    const confirmed=sorted.filter(m=>m.confirmed);
+    const pending=sorted.filter(m=>!m.confirmed);
+    
+    let html='';
+    // Confirmed section
+    if(confirmed.length>0){
+        html+=`<div class="section-label">✅ Confirmed (${confirmed.length})</div>`;
+        confirmed.forEach(m=>{html+=renderMaskItem(m);});
+    }
+    // Pending section
+    if(pending.length>0){
+        html+=`<div class="section-label">⏳ Pending (${pending.length})</div>`;
+        pending.forEach(m=>{html+=renderMaskItem(m);});
+    }
+    container.innerHTML=html;
+    
+    // Bind events
+    container.querySelectorAll('.mask-vis').forEach(cb=>{
+        cb.addEventListener('change',e=>{
+            const id=parseInt(e.target.closest('.mask-item').dataset.id);
+            const m=state.masks.find(x=>x.id===id);
+            if(m){m.visible=e.target.checked;fullRedraw();}
         });
+    });
+    container.querySelectorAll('.mask-del').forEach(btn=>{
+        btn.addEventListener('click',e=>{
+            e.stopPropagation();
+            const id=parseInt(btn.dataset.id);
+            state.masks=state.masks.filter(m=>m.id!==id);
+            if(state.highlightMaskId===id)state.highlightMaskId=null;
+            updateMaskList();fullRedraw();
+        });
+    });
+    container.querySelectorAll('.mask-item').forEach(el=>{
+        el.addEventListener('click',function(e){
+            if(e.target.closest('.mask-actions')||e.target.closest('input'))return;
+            const id=parseInt(this.dataset.id);
+            highlightMask(id);
+        });
+    });
+    // Push button state
+    document.getElementById('pushBtn').style.display=hasPending?'inline-block':'none';
+    document.getElementById('pushBtn').textContent=hasPending?`📌 Push All Pending (${pending.length})`:'📌 Push All Pending';
+}
 
-        status(`✅ Exported ${visible.length} masks to: ${data.saved_to}`);
-    } catch (e) {
-        status('❌ Export failed: ' + e.message);
-    }
+function renderMaskItem(m){
+    const checked=m.visible?'checked':'';
+    const cl=m.confirmed?'✅ ':'⏳ ';
+    const badgeClass=`mode-${m.mode.toLowerCase()}-badge`;
+    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}">
+        <input type="checkbox" ${checked} class="mask-vis" style="width:14px;height:14px;cursor:pointer;">
+        <span class="color-dot" style="background:${m.color}"></span>
+        <div class="mask-info">
+            <span class="inst-id">${m.instance_id}</span>
+            <span class="mode-badge ${badgeClass}">${m.mode}</span>
+            <span class="mask-score">${m.score.toFixed(3)}</span>
+        </div>
+        <div class="mask-actions">
+            <button class="del-btn mask-del" data-id="${m.id}" title="Delete">🗑</button>
+        </div>
+    </div>`;
+}
+
+// =====================================================================
+// Highlight mask (click mask item)
+// =====================================================================
+function highlightMask(id){
+    state.highlightMaskId=id;
+    updateMaskList();
+    fullRedraw();
+    const m=state.masks.find(x=>x.id===id);
+    if(m)status(`📍 ${m.instance_id} (score: ${m.score.toFixed(3)})`);
+}
+
+// =====================================================================
+// Push to confirmed
+// =====================================================================
+function pushToConfirmed(){
+    state.masks.forEach(m=>{
+        if(!m.confirmed)m.confirmed=true;
+    });
+    updateMaskList();
+    fullRedraw();
+    status(`✅ All pending masks confirmed.`);
+}
+
+// =====================================================================
+// Batch hide/show
+// =====================================================================
+function hideByMode(modeLabel){
+    state.masks.forEach(m=>{
+        if(m.mode.toLowerCase()===modeLabel)m.visible=false;
+    });
+    updateMaskList();fullRedraw();
+    status(`Hidden Mode ${modeLabel.toUpperCase()} masks`);
+}
+function hideConfirmed(){
+    state.masks.forEach(m=>{if(m.confirmed)m.visible=false});
+    updateMaskList();fullRedraw();
+    status('Hidden confirmed masks');
+}
+function showAllMasks(){
+    state.masks.forEach(m=>m.visible=true);
+    updateMaskList();fullRedraw();
+    status('Shown all masks');
+}
+
+// =====================================================================
+// Clear & Export
+// =====================================================================
+document.getElementById('clearBtn').addEventListener('click',()=>{
+    state.masks=[];state.nextMaskId=0;
+    state.counters={a:{},b:{},c:{}};state.highlightMaskId=null;
+    updateMaskList();fullRedraw();status('Cleared');
+});
+document.getElementById('exportBtn').addEventListener('click',async()=>{
+    const vis=state.masks.filter(m=>m.visible);
+    if(vis.length===0){status('No visible masks.');return}
+    status(`⏳ Exporting ${vis.length} masks...`);
+    try{
+        const data=await apiPost('/api/export',{
+            image_id:state.currentImageId,
+            masks:vis.map(m=>({instance_id:m.instance_id,score:m.score,mask_data:m.mask_data})),
+        });
+        status(`✅ Exported: ${data.saved_to}`);
+    }catch(e){status('❌ '+e.message)}
 });
 
 // =====================================================================
 // Init
 // =====================================================================
+document.getElementById('sortSelect').addEventListener('change',()=>{updateMaskList();});
+
+// =====================================================================
+// Full-size view
+// =====================================================================
+function _fsRender(container,canvas,ctx){
+    canvas.style.width=state.imgW+'px';canvas.style.height=state.imgH+'px';
+    canvas.style.transformOrigin='0 0';
+    canvas.style.transform=`scale(${_fsZoom}) translate(${_fsPanX}px,${_fsPanY}px)`;
+}
+function openFullSize(){
+    if(!state.imageDataUrl||state.masks.length===0){status('No masks to display in full size.');return;}
+    _fsZoom=1;_fsPanX=0;_fsPanY=0;
+    const modal=document.getElementById('fullSizeModal');
+    const fc=document.getElementById('fullSizeCanvas');
+    const container=document.getElementById('fsZoomContainer');
+    fc.width=state.imgW;fc.height=state.imgH;
+    const fctx=fc.getContext('2d');
+    const img=new Image();
+    img.onload=()=>{
+        fctx.drawImage(img,0,0);
+        let drawCount=0;
+        const visMasks=state.masks.filter(x=>x.visible);
+        if(visMasks.length===0){status('No visible masks.');_fsRender(container,fc,fctx);return;}
+        visMasks.forEach(m=>{
+            if(!m.visible)return;
+            const mi=new Image();
+            mi.onload=()=>{
+                const tc=document.createElement('canvas');
+                tc.width=state.imgW;tc.height=state.imgH;
+                const tctx=tc.getContext('2d');
+                tctx.drawImage(mi,0,0,state.imgW,state.imgH);
+                const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
+                const c=hexToRgb(m.color);
+                const out=tctx.createImageData(state.imgW,state.imgH);
+                for(let i=0;i<d.length;i+=4){
+                    if(d[i]>128){out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=150;}
+                }
+                tctx.putImageData(out,0,0);
+                fctx.drawImage(tc,0,0);
+                if(m._centroid&&_fsShowLabels){
+                    fctx.font='bold 14px sans-serif';
+                    fctx.textAlign='center';fctx.textBaseline='middle';
+                    const tx=m._centroid.x,ty=m._centroid.y;
+                    fctx.fillStyle='rgba(0,0,0,.7)';
+                    const tw=fctx.measureText(m.instance_id).width;
+                    fctx.fillRect(tx-tw/2-4,ty-10,tw+8,20);
+                    fctx.fillStyle='#fff';
+                    fctx.fillText(m.instance_id,tx,ty);
+                }
+                drawCount++;
+                if(drawCount===visMasks.length)_fsRender(container,fc,fctx);
+            };
+            mi.src=m.mask_data;
+        });
+    };
+    img.src=state.imageDataUrl;
+    modal.style.display='flex';
+    document.body.style.overflow='hidden';
+
+    // Zoom: scroll wheel (passive:false prevents page scroll)
+    container.addEventListener('wheel',e=>{
+        e.preventDefault();
+        const delta=e.deltaY>0?-0.15:0.15;
+        const newZoom=Math.max(0.2,Math.min(10,_fsZoom+delta));
+        const rect=container.getBoundingClientRect();
+        const mx=e.clientX-rect.left,my=e.clientY-rect.top;
+        const scale=newZoom/_fsZoom;
+        _fsPanX=mx-scale*(mx-_fsPanX);
+        _fsPanY=my-scale*(my-_fsPanY);
+        _fsZoom=newZoom;
+        _fsRender(container,fc,fctx);
+    },{passive:false});
+    // Also prevent page scroll when hovering the modal background
+    document.getElementById('fullSizeModal').addEventListener('wheel',e=>{e.preventDefault()},{passive:false});
+    // Drag to pan
+    container.onmousedown=e=>{
+        if(e.button!==0)return;
+        _fsDragging=true;_fsDragStartX=e.clientX-_fsPanX;_fsDragStartY=e.clientY-_fsPanY;
+        container.style.cursor='grabbing';
+    };
+    document.onmousemove=e=>{
+        if(!_fsDragging)return;
+        _fsPanX=e.clientX-_fsDragStartX;_fsPanY=e.clientY-_fsDragStartY;
+        _fsRender(container,fc,fctx);
+    };
+    document.onmouseup=()=>{_fsDragging=false;container.style.cursor='grab';};
+    // Double-click reset
+    container.ondblclick=()=>{_fsZoom=1;_fsPanX=0;_fsPanY=0;_fsRender(container,fc,fctx);};
+    _fsRender(container,fc,fctx);
+}
+function closeFullSize(){
+    document.getElementById('fullSizeModal').style.display='none';
+    document.body.style.overflow='';
+}
+switchMode('a');
 loadImages();
 </script>
 </body>
