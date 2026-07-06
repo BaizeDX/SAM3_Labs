@@ -1,0 +1,33 @@
+# Batch Segmentation Prompts
+# One prompt per line. Lines starting with # are ignored.
+# Modify this file to add/remove component descriptions.
+
+swallowtail ridge
+horse-back gable
+porcelain inlay
+dougong bracket
+red brick wall
+stone door frame
+waterwheel frieze
+roof ridge sculpture
+carved beam
+painted ceiling
+wooden window lattice
+stone plinth
+eave tile
+cylindrical and flat roof tiles
+drip tile
+main ridge & hip ridge
+rolling-shed roof
+stone-and-brick mosaic wall
+white stone plinth
+stone pillar
+wall painting
+openwork stone lattice window
+stone sill
+wooden door leaf
+couplet plaques
+stone-paved courtyard
+stone slabs
+
+
