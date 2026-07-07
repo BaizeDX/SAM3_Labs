@@ -215,9 +215,23 @@ def run_box_text_single(img, text, box_px):
     scores = state["scores"]
     # Pick the best mask
     best_idx = int(scores.argmax().item())
+    mask_np = masks[best_idx].squeeze().cpu().numpy()
+    score = float(scores[best_idx].item())
+
+    # Clip mask to box area + small margin (20px)
+    margin = 20
+    x1, y1, x2, y2 = box_px
+    x1c = max(0, int(x1 - margin))
+    y1c = max(0, int(y1 - margin))
+    x2c = min(w, int(x2 + margin))
+    y2c = min(h, int(y2 + margin))
+    # Zero out pixels outside the box+margin region
+    clipped = np.zeros_like(mask_np)
+    clipped[y1c:y2c, x1c:x2c] = mask_np[y1c:y2c, x1c:x2c]
+
     return [{
-        "mask": masks[best_idx].squeeze().cpu().numpy(),
-        "score": float(scores[best_idx].item()),
+        "mask": clipped,
+        "score": score,
     }]
 
 
@@ -348,6 +362,42 @@ async def export_masks(req: ExportRequest):
         fname = f"{item.instance_id.replace('#','_').replace('/','_')}_{item.score:.3f}.png"
         mask_pil.save(save_dir / fname)
         meta_list.append({"instance_id": item.instance_id, "score": item.score, "file": fname})
+    # Generate composite with labels
+    import matplotlib.pyplot as plt
+    img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
+    if not img_path.exists():
+        for f in image_files:
+            if Path(f).stem == req.image_id:
+                img_path = INPUT_DIR / f
+                break
+    if img_path.exists():
+        orig = Image.open(img_path).convert("RGB")
+        arr = np.array(orig)
+        h,w = arr.shape[:2]
+        for suffix, show_labels in [("", True), ("_no_labels", False)]:
+            fig, ax = plt.subplots(figsize=(12,10))
+            ax.imshow(arr)
+            overlay = np.zeros((h,w,4), dtype=np.float32)
+            for i,item in enumerate(req.masks):
+                b64 = item.mask_data.split(",")[1] if "," in item.mask_data else item.mask_data
+                mask = Image.open(BytesIO(base64.b64decode(b64))).convert("L")
+                mn = np.array(mask,dtype=bool)
+                c = plt.cm.tab10(i%10)
+                overlay[mn] = list(c[:3]) + [0.5]
+                if show_labels:
+                    ys,xs = np.where(mn)
+                    if len(xs) > 0:
+                        cx,cy = np.mean(xs), np.mean(ys)
+                        ax.text(cx, cy, f"{item.instance_id}:{item.score:.2f}",
+                                color='white', fontsize=7, ha='center', va='center',
+                                bbox=dict(boxstyle='round,pad=0.08', facecolor='black', alpha=0.6))
+            ax.imshow(overlay)
+            ax.set_title(f"{req.image_id} | {len(req.masks)} masks")
+            ax.axis("off")
+            plt.tight_layout()
+            fig.savefig(save_dir / f"composite{suffix}.png", dpi=200, bbox_inches="tight")
+            plt.close(fig)
+
     with open(save_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(meta_list, f, indent=2, ensure_ascii=False)
     return {"saved_to": str(save_dir), "count": len(req.masks)}

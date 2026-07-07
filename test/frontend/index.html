@@ -120,6 +120,9 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <button style="position:absolute;top:4px;right:100px;background:rgba(0,0,0,.6);color:#fff;
     border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
     z-index:10;" id="labelsToggleBtn" onclick="toggleLabels(this)">🏷 Labels ON</button>
+<button style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.6);color:#fff;
+    border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
+    z-index:10;" id="compareToggleBtn" onclick="toggleCompare(this)">👁 Compare</button>
 </div>
 <div id="notesDisplay" style="font-size:11px;color:#666;margin-top:4px"></div>
 <div id="promptChips" class="prompt-list"></div>
@@ -198,6 +201,7 @@ const state={
     colors:['#2563eb','#16a34a','#dc2626','#f59e0b','#0891b2','#db2777','#65a30d','#ea580c','#7c3aed','#06b6d4'],
     a_prompts:[],
     showLabels:true,
+    showMasks:true,
     highlightMaskId:null,
 };
 
@@ -237,6 +241,7 @@ function fullRedraw(){
     const img=new Image();
     img.onload=()=>{
         ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        if(!state.showMasks){drawBox();drawAllLabels();return;}
         // Highlight mask if selected
         let hlMask=null;
         if(state.highlightMaskId!==null){
@@ -503,6 +508,14 @@ function toggleLabels(btn){
     fullRedraw();
 }
 
+function toggleCompare(btn){
+    state.showMasks=!state.showMasks;
+    btn.textContent=state.showMasks?'👁 Compare':'👁 Original';
+    btn.style.background=state.showMasks?'rgba(0,0,0,.6)':'rgba(22,163,74,.7)';
+    // Show/hide mask visibility controls for clarity
+    fullRedraw();
+}
+
 // =====================================================================
 // Image / prompt loading
 // =====================================================================
@@ -592,27 +605,44 @@ function updateMaskList(){
     if(state.masks.length===0){
         container.innerHTML='<div class="mask-empty">No masks yet.</div>';return;
     }
-    // Check if there are pending masks
     const hasPending=state.masks.some(m=>!m.confirmed);
-    
     const sorted=getSortedMasks();
     const confirmed=sorted.filter(m=>m.confirmed);
     const pending=sorted.filter(m=>!m.confirmed);
     
     let html='';
-    // Confirmed section
+    // Confirmed section (collapsible)
     if(confirmed.length>0){
-        html+=`<div class="section-label">✅ Confirmed (${confirmed.length})</div>`;
-        confirmed.forEach(m=>{html+=renderMaskItem(m);});
+        html+=`<div class="section-label" style="cursor:pointer;user-select:none" onclick="toggleCollapse('confirmedGroup')">
+            <span>▶ </span>✅ Confirmed (${confirmed.length})</div>
+            <div id="confirmedGroup">`;
+        // Group by component name within confirmed
+        const groups={};
+        confirmed.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
+        for(const [comp,items] of Object.entries(groups)){
+            html+=`<div style="margin:2px 0;padding-left:8px;border-left:2px solid #ddd">`;
+            html+=`<div style="font-size:10px;color:#888;padding:1px 0">${comp} (${items.length})</div>`;
+            items.forEach(m=>{html+=renderMaskItem(m);});
+            html+=`</div>`;
+        }
+        html+=`</div>`;
     }
     // Pending section
     if(pending.length>0){
-        html+=`<div class="section-label">⏳ Pending (${pending.length})</div>`;
-        pending.forEach(m=>{html+=renderMaskItem(m);});
+        html+=`<div class="section-label">⏳ Pending (${pending.length})`;
+        // Group by component
+        const groups={};
+        pending.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
+        for(const [comp,items] of Object.entries(groups)){
+            html+=`<div style="margin:2px 0;padding-left:8px;border-left:2px solid #2563eb">`;
+            html+=`<div style="font-size:10px;color:#2563eb;padding:1px 0">${comp} (${items.length})</div>`;
+            items.forEach(m=>{html+=renderMaskItem(m);});
+            html+=`</div>`;
+        }
+        html+=`</div>`;
     }
     container.innerHTML=html;
     
-    // Bind events
     container.querySelectorAll('.mask-vis').forEach(cb=>{
         cb.addEventListener('change',e=>{
             const id=parseInt(e.target.closest('.mask-item').dataset.id);
@@ -636,9 +666,17 @@ function updateMaskList(){
             highlightMask(id);
         });
     });
-    // Push button state
     document.getElementById('pushBtn').style.display=hasPending?'inline-block':'none';
     document.getElementById('pushBtn').textContent=hasPending?`📌 Push All Pending (${pending.length})`:'📌 Push All Pending';
+}
+
+let _confirmedCollapsed=false;
+function toggleCollapse(id){
+    _confirmedCollapsed=!_confirmedCollapsed;
+    const el=document.getElementById(id);
+    const label=el.previousElementSibling;
+    if(_confirmedCollapsed){el.style.display='none';label.innerHTML=`<span>▶ </span>✅ Confirmed`;}
+    else{el.style.display='block';label.innerHTML=`<span>▼ </span>✅ Confirmed (${state.masks.filter(m=>m.confirmed).length})`;}
 }
 
 function renderMaskItem(m){
@@ -675,11 +713,11 @@ function highlightMask(id){
 // =====================================================================
 function pushToConfirmed(){
     state.masks.forEach(m=>{
-        if(!m.confirmed)m.confirmed=true;
+        if(!m.confirmed){m.confirmed=true;m.visible=false;}
     });
     updateMaskList();
     fullRedraw();
-    status(`✅ All pending masks confirmed.`);
+    status(`✅ All pending masks confirmed and hidden.`);
 }
 
 // =====================================================================
