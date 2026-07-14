@@ -180,27 +180,27 @@ Masks <small id="maskCount">(0)</small>
 
 <!-- Full-size modal -->
 <div id="fullSizeModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
-    background:rgba(0,0,0,.85);z-index:9999;overflow:auto;cursor:zoom-out;
-    justify-content:center;align-items:center;"
-    onclick="closeFullSize()">
-    <div style="position:relative;display:flex;flex-direction:column;align-items:center;padding:20px;cursor:default"
-         onclick="event.stopPropagation()">
-        <div style="position:fixed;top:12px;right:12px;z-index:100">
-            <button style="background:#dc2626;color:#fff;border:none;border-radius:50%;
-                width:36px;height:36px;font-size:20px;cursor:pointer;font-weight:bold;
-                box-shadow:0 2px 8px rgba(0,0,0,.3);"
-                onclick="closeFullSize()">✕</button>
-        </div>
-        <div style="overflow:hidden;position:relative;margin:0 auto;display:inline-block;
-            border-radius:8px;box-shadow:0 4px 40px rgba(0,0,0,.5);cursor:grab;"
-            id="fsZoomContainer">
-            <canvas id="fullSizeCanvas" style="display:block;border-radius:8px;"></canvas>
-        </div>
-        <div style="text-align:center;margin-top:8px;display:flex;gap:12px;justify-content:center;font-size:12px;color:rgba(255,255,255,.6)">
-            <span>🖱 Scroll to zoom · Drag to pan</span>
-            <button style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;"
-                onclick="toggleFsLabels(this)">🏷 Labels ON</button>
-        </div>
+    background:rgba(0,0,0,.85);z-index:9999;
+    justify-content:center;align-items:center;user-select:none">
+    <div style="position:fixed;top:12px;right:12px;z-index:100">
+        <button style="background:#dc2626;color:#fff;border:none;border-radius:50%;
+            width:36px;height:36px;font-size:20px;cursor:pointer;font-weight:bold;
+            box-shadow:0 2px 8px rgba(0,0,0,.3);"
+            onclick="closeFullSize()">✕</button>
+    </div>
+    <div style="overflow:hidden;position:relative;margin:0 auto;display:inline-block;
+        border-radius:8px;box-shadow:0 4px 40px rgba(0,0,0,.5);cursor:grab;"
+        id="fsZoomContainer">
+        <canvas id="fullSizeCanvas" style="display:block;border-radius:8px;"></canvas>
+    </div>
+    <div style="position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+        text-align:center;display:flex;gap:16px;justify-content:center;font-size:12px;
+        color:rgba(255,255,255,.6);background:rgba(0,0,0,.5);padding:6px 16px;border-radius:8px">
+        <span>🖱 滚轮缩放 · 拖拽平移</span>
+        <span>⌨️ ESC 关闭 · +/- 缩放 · 0 复位</span>
+        <button style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.3);
+            border-radius:4px;padding:2px 10px;cursor:pointer;font-size:11px;"
+            onclick="toggleFsLabels(this)">🏷 Labels ON</button>
     </div>
 </div>
 </div>
@@ -393,58 +393,13 @@ function computeCentroid(maskDataUrl){
     });
 }
 
-let _fsShowLabels=true,_fsZoom=1,_fsPanX=0,_fsPanY=0,_fsDragging=false,_fsDragStartX=0,_fsDragStartY=0;
-
-function toggleFsLabels(btn){
-    _fsShowLabels=!_fsShowLabels;
-    btn.textContent=_fsShowLabels?'🏷 Labels ON':'🏷 Labels OFF';
-    btn.style.opacity=_fsShowLabels?'1':'0.5';
-    _fsRedrawLabels();
-}
-
-function _fsRedrawLabels(){
-    const fc=document.getElementById('fullSizeCanvas');
-    const fctx=fc.getContext('2d');
-    // Reload original image and redraw all content with current label setting
-    const img=new Image();
-    img.onload=()=>{
-        fctx.drawImage(img,0,0);
-        let drawCount=0;
-        const visMasks=state.masks.filter(x=>x.visible);
-        if(visMasks.length===0)return;
-        visMasks.forEach(m=>{
-            if(!m.visible)return;
-            const mi=new Image();
-            mi.onload=()=>{
-                const tc=document.createElement('canvas');
-                tc.width=state.imgW;tc.height=state.imgH;
-                const tctx=tc.getContext('2d');
-                tctx.drawImage(mi,0,0,state.imgW,state.imgH);
-                const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
-                const c=hexToRgb(m.color);
-                const out=tctx.createImageData(state.imgW,state.imgH);
-                for(let i=0;i<d.length;i+=4){
-                    if(d[i]>128){out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=150;}
-                }
-                tctx.putImageData(out,0,0);
-                fctx.drawImage(tc,0,0);
-                if(m._centroid&&_fsShowLabels){
-                    fctx.font='bold 14px sans-serif';
-                    fctx.textAlign='center';fctx.textBaseline='middle';
-                    const tx=m._centroid.x,ty=m._centroid.y;
-                    fctx.fillStyle='rgba(0,0,0,.7)';
-                    const tw=fctx.measureText(m.instance_id).width;
-                    fctx.fillRect(tx-tw/2-4,ty-10,tw+8,20);
-                    fctx.fillStyle='#fff';
-                    fctx.fillText(m.instance_id,tx,ty);
-                }
-                drawCount++;
-            };
-            mi.src=m.mask_data;
-        });
-    };
-    img.src=state.imageDataUrl;
-}
+// =====================================================================
+// Full-size magnified view
+// =====================================================================
+let _fsZoom=1,_fsPanX=0,_fsPanY=0,_fsDragging=false;
+let _fsDragStartX=0,_fsDragStartY=0,_fsShowLabels=true;
+let _fsCachedDataUrl=null; // cached canvas without labels (for fast label toggle)
+let _fsCleanup=null;       // cleanup function for event listeners
 
 async function drawAllLabels(){
     if(!state.showLabels)return;
@@ -952,29 +907,35 @@ document.getElementById('exportBtn').addEventListener('click',async()=>{
 document.getElementById('sortSelect').addEventListener('change',()=>{updateMaskList();});
 
 // =====================================================================
-// Full-size view
+// Full-size magnified view
 // =====================================================================
-function _fsRender(container,canvas,ctx){
-    canvas.style.width=state.imgW+'px';canvas.style.height=state.imgH+'px';
+function _fsApplyTransform(){
+    const canvas=document.getElementById('fullSizeCanvas');
+    canvas.style.width=state.imgW+'px';
+    canvas.style.height=state.imgH+'px';
     canvas.style.transformOrigin='0 0';
     canvas.style.transform=`scale(${_fsZoom}) translate(${_fsPanX}px,${_fsPanY}px)`;
 }
 function openFullSize(){
-    if(!state.imageDataUrl||state.masks.length===0){status('No masks to display in full size.');return;}
-    _fsZoom=1;_fsPanX=0;_fsPanY=0;
+    if(!state.imageDataUrl){status('No image loaded.');return;}
+    _fsZoom=1;_fsPanX=0;_fsPanY=0;_fsShowLabels=true;_fsCachedDataUrl=null;
+
     const modal=document.getElementById('fullSizeModal');
     const fc=document.getElementById('fullSizeCanvas');
     const container=document.getElementById('fsZoomContainer');
+
     fc.width=state.imgW;fc.height=state.imgH;
     const fctx=fc.getContext('2d');
+
+    // Render background image at full resolution
     const img=new Image();
     img.onload=()=>{
         fctx.drawImage(img,0,0);
-        let drawCount=0;
-        const visMasks=state.masks.filter(x=>x.visible);
-        if(visMasks.length===0){status('No visible masks.');_fsRender(container,fc,fctx);return;}
+
+        // Draw all visible masks on top (async, one by one)
+        const visMasks=state.masks.filter(m=>m.visible);
+        let loaded=0;
         visMasks.forEach(m=>{
-            if(!m.visible)return;
             const mi=new Image();
             mi.onload=()=>{
                 const tc=document.createElement('canvas');
@@ -985,11 +946,14 @@ function openFullSize(){
                 const c=hexToRgb(m.color);
                 const out=tctx.createImageData(state.imgW,state.imgH);
                 for(let i=0;i<d.length;i+=4){
-                    if(d[i]>128){out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=150;}
+                    if(d[i]>128){
+                        out.data[i]=c.r;out.data[i+1]=c.g;out.data[i+2]=c.b;out.data[i+3]=150;
+                    }
                 }
                 tctx.putImageData(out,0,0);
                 fctx.drawImage(tc,0,0);
-                if(m._centroid&&_fsShowLabels){
+                // Draw label overlay
+                if(m._centroid){
                     fctx.font='bold 14px sans-serif';
                     fctx.textAlign='center';fctx.textBaseline='middle';
                     const tx=m._centroid.x,ty=m._centroid.y;
@@ -999,18 +963,24 @@ function openFullSize(){
                     fctx.fillStyle='#fff';
                     fctx.fillText(m.instance_id,tx,ty);
                 }
-                drawCount++;
-                if(drawCount===visMasks.length)_fsRender(container,fc,fctx);
+                loaded++;
+                // After all masks drawn, cache the result (without label toggle state)
+                if(loaded===visMasks.length){
+                    _fsCachedDataUrl=fc.toDataURL();
+                }
             };
             mi.src=m.mask_data;
         });
+
+        _fsApplyTransform();
     };
     img.src=state.imageDataUrl;
+
     modal.style.display='flex';
     document.body.style.overflow='hidden';
 
-    // Zoom: scroll wheel (passive:false prevents page scroll)
-    container.addEventListener('wheel',e=>{
+    // --- Event listeners with proper cleanup ---
+    const wheelHandler=e=>{
         e.preventDefault();
         const delta=e.deltaY>0?-0.15:0.15;
         const newZoom=Math.max(0.2,Math.min(10,_fsZoom+delta));
@@ -1020,29 +990,87 @@ function openFullSize(){
         _fsPanX=mx-scale*(mx-_fsPanX);
         _fsPanY=my-scale*(my-_fsPanY);
         _fsZoom=newZoom;
-        _fsRender(container,fc,fctx);
-    },{passive:false});
-    // Also prevent page scroll when hovering the modal background
-    document.getElementById('fullSizeModal').addEventListener('wheel',e=>{e.preventDefault()},{passive:false});
-    // Drag to pan
-    container.onmousedown=e=>{
+        _fsApplyTransform();
+    };
+    const mdHandler=e=>{
         if(e.button!==0)return;
-        _fsDragging=true;_fsDragStartX=e.clientX-_fsPanX;_fsDragStartY=e.clientY-_fsPanY;
+        _fsDragging=true;
+        _fsDragStartX=e.clientX-_fsPanX;
+        _fsDragStartY=e.clientY-_fsPanY;
         container.style.cursor='grabbing';
     };
-    document.onmousemove=e=>{
+    const mmHandler=e=>{
         if(!_fsDragging)return;
-        _fsPanX=e.clientX-_fsDragStartX;_fsPanY=e.clientY-_fsDragStartY;
-        _fsRender(container,fc,fctx);
+        _fsPanX=e.clientX-_fsDragStartX;
+        _fsPanY=e.clientY-_fsDragStartY;
+        _fsApplyTransform();
     };
-    document.onmouseup=()=>{_fsDragging=false;container.style.cursor='grab';};
-    // Double-click reset
-    container.ondblclick=()=>{_fsZoom=1;_fsPanX=0;_fsPanY=0;_fsRender(container,fc,fctx);};
-    _fsRender(container,fc,fctx);
+    const muHandler=()=>{
+        _fsDragging=false;
+        container.style.cursor='grab';
+    };
+    const dblHandler=()=>{
+        _fsZoom=1;_fsPanX=0;_fsPanY=0;
+        _fsApplyTransform();
+    };
+    const keyHandler=e=>{
+        if(e.key==='Escape')closeFullSize();
+        if(e.key==='+'||e.key==='='){_fsZoom=Math.min(10,_fsZoom+0.3);_fsApplyTransform();}
+        if(e.key==='-'){_fsZoom=Math.max(0.2,_fsZoom-0.3);_fsApplyTransform();}
+        if(e.key==='0'){_fsZoom=1;_fsPanX=0;_fsPanY=0;_fsApplyTransform();}
+    };
+
+    container.addEventListener('wheel',wheelHandler,{passive:false});
+    container.addEventListener('mousedown',mdHandler);
+    document.addEventListener('mousemove',mmHandler);
+    document.addEventListener('mouseup',muHandler);
+    container.addEventListener('dblclick',dblHandler);
+    document.addEventListener('keydown',keyHandler);
+
+    _fsCleanup=()=>{
+        container.removeEventListener('wheel',wheelHandler);
+        container.removeEventListener('mousedown',mdHandler);
+        document.removeEventListener('mousemove',mmHandler);
+        document.removeEventListener('mouseup',muHandler);
+        container.removeEventListener('dblclick',dblHandler);
+        document.removeEventListener('keydown',keyHandler);
+    };
 }
+
 function closeFullSize(){
     document.getElementById('fullSizeModal').style.display='none';
     document.body.style.overflow='';
+    if(_fsCleanup){_fsCleanup();_fsCleanup=null;}
+    _fsZoom=1;_fsPanX=0;_fsPanY=0;_fsCachedDataUrl=null;
+}
+
+function toggleFsLabels(btn){
+    _fsShowLabels=!_fsShowLabels;
+    btn.textContent=_fsShowLabels?'🏷 Labels ON':'🏷 Labels OFF';
+    btn.style.opacity=_fsShowLabels?'1':'0.5';
+
+    const fc=document.getElementById('fullSizeCanvas');
+    const fctx=fc.getContext('2d');
+
+    if(!_fsCachedDataUrl) return; // masks not done loading yet
+
+    const cached=new Image();
+    cached.onload=()=>{
+        fctx.drawImage(cached,0,0);
+        if(_fsShowLabels){
+            // Draw labels on top from cached centroid data
+            state.masks.filter(m=>m.visible&&m._centroid).forEach(m=>{
+                fctx.font='bold 14px sans-serif';
+                fctx.textAlign='center';fctx.textBaseline='middle';
+                fctx.fillStyle='rgba(0,0,0,.7)';
+                const tw=fctx.measureText(m.instance_id).width;
+                fctx.fillRect(m._centroid.x-tw/2-4,m._centroid.y-10,tw+8,20);
+                fctx.fillStyle='#fff';
+                fctx.fillText(m.instance_id,m._centroid.x,m._centroid.y);
+            });
+        }
+    };
+    cached.src=_fsCachedDataUrl;
 }
 
 // =====================================================================
