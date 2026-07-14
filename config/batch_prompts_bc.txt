@@ -6,3 +6,5 @@ water_table
 door_frame
 relief
 pillar
+waterwheel_blockage
+roof_ridge

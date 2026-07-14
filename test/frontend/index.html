@@ -103,6 +103,7 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <div class="mode-tab active-a" data-mode="a" onclick="switchMode('a')">📝 A: 纯文本</div>
 <div class="mode-tab" data-mode="b" onclick="switchMode('b')">🟦 B: 框+多掩码</div>
 <div class="mode-tab" data-mode="c" onclick="switchMode('c')">🟥 C: 框+单掩码</div>
+<div class="mode-tab" data-mode="d" onclick="switchMode('d')">🟨 D: 多边形</div>
 </div>
 
 <div class="toolbar">
@@ -110,7 +111,13 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <span id="modeToolbarA"><label>Prompt: <select id="promptSelect"><option>loading</option></select></label></span>
 <span id="modeToolbarBC" class="hidden" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:180px"></label>
-    <div id="bcPromptChips" class="prompt-list" style="margin:0;display:inline-flex"></div>
+    <span onclick="toggleBCPresets()" style="font-size:11px;cursor:pointer;color:#888;user-select:none;white-space:nowrap" id="bcToggleBtn">▼ 预制标签</span>
+</span>
+<span id="modeToolbarD" class="hidden" style="display:inline-flex;align-items:center;gap:4px">
+    <button class="btn btn-sm btn-outline" onclick="polyUndo()" id="polyUndoBtn" disabled>↩ 撤销点</button>
+    <button class="btn btn-sm btn-outline" onclick="polyClear()">🗑 清除</button>
+    <button class="btn btn-sm btn-primary" onclick="polyClose()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600">✓ 创建蒙版</button>
+    <span style="font-size:11px;color:#888" id="polyInfo">点击画布放置顶点，点击起点闭合</span>
 </span>
     <span id="segToolbar">
     <button class="btn btn-a" id="runBtn">▶ Run A</button>
@@ -142,6 +149,9 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 </div>
 <div id="notesDisplay" style="font-size:11px;color:#666;margin-top:4px"></div>
 <div id="promptChips" class="prompt-list"></div>
+<div id="bcPresetPanel" style="margin:4px 0;overflow:hidden;transition:max-height 0.25s ease">
+    <div id="bcPromptChips" class="prompt-list" style="margin:0"></div>
+</div>
 </div>
 
 <div class="side-panel">
@@ -213,13 +223,17 @@ const state={
     workMode:'segment', // 'segment' | 'eval'
     masks:[],        // {id,instance_id,mode,text,score,mask_data,visible,box,color,confirmed,batch,eval}
     nextMaskId:0,
-    counters:{a:{},b:{},c:{}},
+    counters:{a:{},b:{},c:{},d:{}},
     isDrawBox:false, boxStart:null, boxEnd:null, currentBox:null,
     colors:['#2563eb','#16a34a','#dc2626','#f59e0b','#0891b2','#db2777','#65a30d','#ea580c','#7c3aed','#06b6d4'],
     a_prompts:[],
     showLabels:true,
     showMasks:true,
     highlightMaskId:null,
+    // Polygon drawing (Mode D)
+    polygon:null,          // [{x,y},...] current polygon vertices (image coords)
+    draggingVertex:-1,     // vertex index being dragged, -1=none
+    polyMousePos:null,     // {x,y} mouse position for preview line
 };
 
 const canvas=document.getElementById('imageCanvas');
@@ -269,6 +283,7 @@ function quickRedraw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bc, 0, 0);
     drawBox();
+    drawPolygonOverlay();
 }
 
 /**
@@ -278,11 +293,11 @@ function quickRedraw() {
 function fullRedraw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     _labelEls.forEach(e=>e.remove());_labelEls=[];
-    if(!state.imageDataUrl){drawBox();return}
+    if(!state.imageDataUrl){drawBox();drawPolygonOverlay();return}
     const img=new Image();
     img.onload=()=>{
         ctx.drawImage(img,0,0,canvas.width,canvas.height);
-        if(!state.showMasks){drawAllLabels();cacheBackdrop();drawBox();return;}
+        if(!state.showMasks){drawAllLabels();cacheBackdrop();drawBox();drawPolygonOverlay();return;}
         let hlMask=null;
         if(state.highlightMaskId!==null){
             hlMask=state.masks.find(m=>m.id===state.highlightMaskId);
@@ -302,12 +317,14 @@ function fullRedraw(){
                 drawAllLabels();
                 cacheBackdrop();
                 drawBox();
+                drawPolygonOverlay();
             };
             mi.src=hlMask.mask_data;
         } else {
             drawAllLabels();
             cacheBackdrop();
             drawBox();
+            drawPolygonOverlay();
         }
     };
     img.src=state.imageDataUrl;
@@ -438,20 +455,264 @@ async function drawAllLabels(){
 }
 
 // =====================================================================
+// Polygon drawing (Mode D)
+// =====================================================================
+const POLY_CLOSE_THRESHOLD = 12; // px in canvas coords to snap-close polygon
+
+function polygonToMaskDataUrl(pts){
+    // Render filled polygon on offscreen canvas at full resolution → base64 PNG
+    const c=document.createElement('canvas');c.width=state.imgW;c.height=state.imgH;
+    const cx=c.getContext('2d');
+    cx.beginPath();cx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++)cx.lineTo(pts[i].x,pts[i].y);
+    cx.closePath();cx.fillStyle='#fff';cx.fill();
+    return c.toDataURL();
+}
+
+function polyAddVertex(x,y){
+    // Add vertex in image coords; auto-close if near first vertex
+    if(!state.polygon)state.polygon=[];
+    // If polygon is "closed" (first vertex == last vertex), remove closing vertex to reopen for editing
+    if(state.polygon.length>=2){
+        const f=state.polygon[0], l=state.polygon[state.polygon.length-1];
+        if(Math.abs(f.x-l.x)<1&&Math.abs(f.y-l.y)<1){
+            state.polygon=state.polygon.slice(0,-1);
+        }
+    }
+    // Check if clicking near first vertex (close polygon)
+    if(state.polygon.length>=2){
+        const s=getScale();
+        const fx=state.polygon[0].x/s.sx, fy=state.polygon[0].y/s.sy;
+        const mx=x/s.sx, my=y/s.sy;
+        const dx=mx-fx, dy=my-fy;
+        if(Math.sqrt(dx*dx+dy*dy)<POLY_CLOSE_THRESHOLD){
+            polyClose();return;
+        }
+    }
+    state.polygon.push({x,y});
+    document.getElementById('polyUndoBtn').disabled=false;
+    document.getElementById('polyInfo').textContent=`${state.polygon.length} 顶点`;
+    fullRedraw();
+}
+
+function polyUndo(){
+    if(!state.polygon||state.polygon.length===0)return;
+    state.polygon.pop();
+    if(state.polygon.length===0)document.getElementById('polyUndoBtn').disabled=true;
+    document.getElementById('polyInfo').textContent=state.polygon.length?`${state.polygon.length} 顶点`:'点击画布放置顶点，点击起点或双击闭合';
+    fullRedraw();
+}
+
+function polyClear(){
+    state.polygon=null;state.draggingVertex=-1;state.polyMousePos=null;
+    document.getElementById('polyUndoBtn').disabled=true;
+    document.getElementById('polyInfo').textContent='点击画布放置顶点，点击起点或双击闭合';
+    fullRedraw();
+}
+
+function polyClose(){
+    try{
+        if(!state.polygon||state.polygon.length<2){status('D: 至少需要2个顶点('+(state.polygon?state.polygon.length:0)+')');return;}
+        const pts=[...state.polygon];
+        const text=document.getElementById('textInput').value.trim()||document.getElementById('promptSelect').value;
+        if(!text){status('D: 请输入文本');return;}
+        const maskData=polygonToMaskDataUrl(pts);
+        const batchId=Date.now();
+        state.masks.push({
+            id:state.nextMaskId++,instance_id:getNextId('d',text),
+            mode:'D',text,score:1.0,
+            mask_data:maskData,visible:true,box:null,
+            color:getColor(state.nextMaskId),confirmed:false,
+            batch:batchId,
+            eval:{underSeg:false,overSeg:false,boundary:false,iou:null},
+            polygon:pts,
+        });
+        status(`✅ D: 多边形掩码已创建 (${pts.length} 顶点)`);
+        state.polygon=null;state.draggingVertex=-1;state.polyMousePos=null;
+        checkNewMaskOverlap(state.nextMaskId-1);
+        document.getElementById('polyUndoBtn').disabled=true;
+        document.getElementById('polyInfo').textContent='点击画布放置顶点，点击起点闭合';
+        updateMaskList();fullRedraw();
+    }catch(e){status('❌ D错误: '+e.message);}
+}
+
+function polyEdit(maskId){
+    const m=state.masks.find(x=>x.id===maskId);
+    if(!m||!m.polygon)return;
+    state.polygon=m.polygon.map(p=>({x:p.x,y:p.y}));
+    state.polygon.push({x:m.polygon[0].x,y:m.polygon[0].y}); // closing vertex visual
+    state.draggingVertex=-1;state.polyMousePos=null;
+    document.getElementById('polyUndoBtn').disabled=false;
+    document.getElementById('polyInfo').textContent=`✏️ 编辑 ${m.instance_id} (${m.polygon.length} 顶点)`;
+    switchMode('d');
+}
+
+function drawPolygonOverlay(){
+    if(!state.polygon||state.polygon.length===0)return;
+    const pts=state.polygon;const s=getScale();
+    ctx.save();
+    // Draw filled polygon semi-transparent (preview)
+    if(pts.length>=3){
+        ctx.beginPath();ctx.moveTo(pts[0].x/s.sx,pts[0].y/s.sy);
+        for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x/s.sx,pts[i].y/s.sy);
+        ctx.closePath();
+        ctx.fillStyle='rgba(245,158,11,0.12)';ctx.fill();
+        ctx.strokeStyle='#f59e0b';ctx.lineWidth=2.5;ctx.setLineDash([]);ctx.stroke();
+    } else if(pts.length===2){
+        ctx.beginPath();ctx.moveTo(pts[0].x/s.sx,pts[0].y/s.sy);
+        ctx.lineTo(pts[1].x/s.sx,pts[1].y/s.sy);
+        ctx.strokeStyle='#f59e0b';ctx.lineWidth=2.5;ctx.stroke();
+    }
+    // Draw preview line to mouse
+    if(pts.length>0&&state.polyMousePos){
+        const last=pts[pts.length-1];
+        ctx.beginPath();ctx.moveTo(last.x/s.sx,last.y/s.sy);
+        ctx.lineTo(state.polyMousePos.x/s.sx,state.polyMousePos.y/s.sy);
+        ctx.strokeStyle='rgba(245,158,11,0.45)';ctx.lineWidth=2;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);
+    }
+    // Draw vertices
+    const r=5;
+    for(let i=0;i<pts.length;i++){
+        const vx=pts[i].x/s.sx,vy=pts[i].y/s.sy;
+        ctx.beginPath();ctx.arc(vx,vy,r,0,Math.PI*2);
+        ctx.fillStyle=i===0?'#dc2626':'#f59e0b';
+        ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
+        // Vertex number
+        ctx.fillStyle='#fff';ctx.font='bold 8px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(i+1,vx,vy);
+    }
+    ctx.restore();
+}
+
+// =====================================================================
+// Mask overlap detection (warn if new mask overlaps existing masks)
+// =====================================================================
+const OVERLAP_WARN_IOU = 0.10;  // IoU >= 10% triggers warning
+const OVERLAP_ALERT_IOU = 0.30; // IoU >= 30% triggers strong warning
+
+async function computeMaskOverlap(maskA, maskB) {
+    // Downsample both masks to 256px max dimension for fast pixel comparison
+    const maxDim = 256;
+    const scale = Math.min(maxDim / state.imgW, maxDim / state.imgH, 1);
+    const cw = Math.round(state.imgW * scale);
+    const ch = Math.round(state.imgH * scale);
+
+    const img1 = new Image(); img1.src = maskA;
+    const img2 = new Image(); img2.src = maskB;
+    await Promise.all([img1.decode(), img2.decode()]);
+
+    const c = document.createElement('canvas');
+    c.width = cw; c.height = ch;
+    const ctx = c.getContext('2d');
+
+    // Mask A
+    ctx.drawImage(img1, 0, 0, cw, ch);
+    const d1 = new Uint32Array(ctx.getImageData(0, 0, cw, ch).data.buffer);
+
+    // Mask B
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.drawImage(img2, 0, 0, cw, ch);
+    const d2 = new Uint32Array(ctx.getImageData(0, 0, cw, ch).data.buffer);
+
+    let areaA = 0, areaB = 0, overlap = 0;
+    for (let i = 0; i < d1.length; i++) {
+        const a = (d1[i] & 0xff) > 128 ? 1 : 0;
+        const b = (d2[i] & 0xff) > 128 ? 1 : 0;
+        if (a) areaA++;
+        if (b) areaB++;
+        if (a && b) overlap++;
+    }
+
+    const union = areaA + areaB - overlap;
+    return {
+        iou: union > 0 ? overlap / union : 0,
+        overlapRatio: Math.min(areaA, areaB) > 0 ? overlap / Math.min(areaA, areaB) : 0,
+        overlap, areaA, areaB,
+    };
+}
+
+async function checkNewMaskOverlap(newMaskId) {
+    const newMask = state.masks.find(m => m.id === newMaskId);
+    if (!newMask) return;
+
+    // Only mark the NEW mask, clear its previous warnings
+    state.masks.forEach(m => { if(m.id !== newMaskId) m.overlapWarn = false; });
+    newMask.overlapWarn = false;
+    newMask.overlapWith = [];
+
+    const warnings = [];
+    for (const m of state.masks) {
+        if (m.id === newMaskId) continue;
+        const r = await computeMaskOverlap(newMask.mask_data, m.mask_data);
+        if (r.iou >= OVERLAP_WARN_IOU) {
+            newMask.overlapWarn = true;
+            newMask.overlapWith.push({id:m.id, name:m.instance_id, iou:r.iou});
+            const icon = r.iou >= OVERLAP_ALERT_IOU ? '🔴' : '🟡';
+            warnings.push(`${icon} ${m.instance_id}: IoU=${(r.iou*100).toFixed(0)}%`);
+        }
+    }
+    if (warnings.length > 0) {
+        status(`⚠️ 重叠警告: ${warnings.slice(0,3).join(' | ')}${warnings.length>3?` (+${warnings.length-3}个)`:''}`);
+    }
+    updateMaskList();
+}
+
+// =====================================================================
 // Canvas mouse events
 // =====================================================================
 canvas.addEventListener('mousedown',e=>{
     if(state.mode==='a')return;
     const r=canvas.getBoundingClientRect();
+    const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    if(state.mode==='d'){
+        if(state.polygon&&state.polygon.length>0){
+            const s=getScale();
+            // First: check if clicking near vertex 0 (first vertex) → close polygon
+            if(state.polygon.length>=2){
+                const vx0=state.polygon[0].x/s.sx, vy0=state.polygon[0].y/s.sy;
+                if(Math.sqrt((cx-vx0)**2+(cy-vy0)**2)<POLY_CLOSE_THRESHOLD){
+                    polyAddVertex(canvasToImg(cx,cy).x,canvasToImg(cx,cy).y);
+                    return;
+                }
+            }
+            // Second: check other vertices for drag (skip vertex 0, already handled above)
+            for(let i=1;i<state.polygon.length;i++){
+                const vx=state.polygon[i].x/s.sx,vy=state.polygon[i].y/s.sy;
+                const dx=cx-vx,dy=cy-vy;
+                if(Math.sqrt(dx*dx+dy*dy)<8){
+                    state.draggingVertex=i;
+                    state.polygon[i]={...state.polygon[i]};
+                    return;
+                }
+            }
+        }
+        polyAddVertex(canvasToImg(cx,cy).x,canvasToImg(cx,cy).y);
+        return;
+    }
     state.isDrawBox=true;
-    state.boxStart={x:e.clientX-r.left,y:e.clientY-r.top};
-    state.boxEnd={x:e.clientX-r.left,y:e.clientY-r.top};
+    state.boxStart={x:cx,y:cy};
+    state.boxEnd={x:cx,y:cy};
 });
 canvas.addEventListener('mousemove',e=>{
     const r=canvas.getBoundingClientRect();
     const cx=e.clientX-r.left,cy=e.clientY-r.top;
     const img=canvasToImg(cx,cy);
     document.getElementById('coordDisplay').textContent=`x:${Math.round(img.x)} y:${Math.round(img.y)}`;
+    if(state.mode==='d'){
+        state.polyMousePos={x:img.x,y:img.y};
+        if(state.draggingVertex>=0&&state.polygon&&state.draggingVertex<state.polygon.length){
+            state.polygon[state.draggingVertex]={x:img.x,y:img.y};
+            quickRedraw();
+        }else{
+            // Lightweight: just update preview line without full redraw
+            // quickRedraw is needed for the preview line to show
+            // but we avoid it during vertex drag since quickRedraw is already called above
+            if(state.polygon&&state.polygon.length>0){
+                quickRedraw();
+            }
+        }
+        return;
+    }
     if(state.isDrawBox&&state.boxStart){
         state.boxEnd={x:cx,y:cy};
         const s=getScale();
@@ -464,6 +725,10 @@ canvas.addEventListener('mousemove',e=>{
     }
 });
 canvas.addEventListener('mouseup',e=>{
+    if(state.mode==='d'){
+        state.draggingVertex=-1;
+        return;
+    }
     if(!state.isDrawBox)return;
     state.isDrawBox=false;
     const s=getScale();
@@ -476,7 +741,14 @@ canvas.addEventListener('mouseup',e=>{
     fullRedraw();
     status(`Box: (${Math.round(bx1)},${Math.round(by1)})-(${Math.round(bx2)},${Math.round(by2)})`);
 });
-canvas.addEventListener('mouseleave',()=>{state.isDrawBox=false;});
+canvas.addEventListener('dblclick',e=>{
+    // Mode D closes only by clicking vertex 1; double-click does nothing
+});
+canvas.addEventListener('mouseleave',()=>{
+    state.isDrawBox=false;
+    state.polyMousePos=null;
+    state.draggingVertex=-1;
+});
 
 // =====================================================================
 // Mode switching
@@ -484,18 +756,22 @@ canvas.addEventListener('mouseleave',()=>{state.isDrawBox=false;});
 function switchMode(mode){
     state.mode=mode;
     document.querySelectorAll('.mode-tab').forEach(t=>{
-        t.classList.remove('active-a','active-b','active-c');
+        t.classList.remove('active-a','active-b','active-c','active-d');
         if(t.dataset.mode===mode)t.classList.add(`active-${mode}`);
     });
     document.getElementById('modeToolbarA').classList.toggle('hidden',mode!=='a');
     document.getElementById('modeToolbarBC').classList.toggle('hidden',mode==='a');
+    document.getElementById('modeToolbarD').classList.toggle('hidden',mode!=='d');
     const runBtn=document.getElementById('runBtn');
-    runBtn.className=`btn btn-${mode}`;
-    const labels={a:'▶ Run A (Text)',b:'▶ Run B (Multi)',c:'▶ Run C (Single)'};
+    if(mode==='d'){runBtn.style.display='none';}else{runBtn.style.display='';}
+    runBtn.className=`btn btn-${mode==='d'?'a':mode}`;
+    const labels={a:'▶ Run A (Text)',b:'▶ Run B (Multi)',c:'▶ Run C (Single)',d:'▶ D (Polygon)'};
     runBtn.textContent=labels[mode];
-    const ind={a:'Mode A: Pure Text',b:'Mode B: Box+Multi-Mask',c:'Mode C: Box+Single-Mask'};
+    const ind={a:'Mode A: Pure Text',b:'Mode B: Box+Multi-Mask',c:'Mode C: Box+Single-Mask',d:'Mode D: Manual Polygon'};
     document.getElementById('modeIndicator').textContent=ind[mode];
     canvas.style.cursor=mode==='a'?'default':'crosshair';
+    // Clear polygon state when leaving D mode
+    if(mode!=='d'){state.polygon=null;state.draggingVertex=-1;state.polyMousePos=null;}
     status(`Switched to ${ind[mode]}`);
 }
 
@@ -520,6 +796,19 @@ function toggleWorkMode(){
     status(isEval?'📊 Evaluation mode: mark Under/Over/Boundary for each mask, drag IoU sliders':'🔧 Segmentation mode');
 }
 
+function toggleBCPresets(){
+    const panel=document.getElementById('bcPresetPanel');
+    const btn=document.getElementById('bcToggleBtn');
+    const isOpen=panel.style.maxHeight&&panel.style.maxHeight!=='0px';
+    if(isOpen){
+        panel.style.maxHeight='0px';
+        btn.textContent='▶ 预制标签';
+    }else{
+        panel.style.maxHeight=panel.scrollHeight+100+'px';
+        btn.textContent='▼ 预制标签';
+    }
+}
+
 function toggleCompare(btn){
     state.showMasks=!state.showMasks;
     btn.textContent=state.showMasks?'👁 Compare':'👁 Original';
@@ -542,7 +831,7 @@ async function loadImage(id){
     state.currentImageId=id;state.imageDataUrl=d.data_url;state.imgW=d.width;state.imgH=d.height;
     const sc=Math.min(800/d.width,600/d.height);
     canvas.width=Math.round(d.width*sc);canvas.height=Math.round(d.height*sc);
-    state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{}};state.currentBox=null;state.highlightMaskId=null;
+    state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;
     updateMaskList();fullRedraw();status(`Loaded: ${id}`);
     loadPrompts();
     loadPromptsBC();
@@ -612,6 +901,9 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
         });
         status(`✅ ${mode.toUpperCase()}: ${data.masks.length} masks (pending). Total: ${state.masks.length}`);
         updateMaskList();fullRedraw();
+        // Check overlaps for newly created masks
+        const startId=state.nextMaskId-data.masks.length;
+        for(let i=0;i<data.masks.length;i++)checkNewMaskOverlap(startId+i);
     }catch(e){status('❌ '+e.message)}
     runBtn.disabled=false;
 });
@@ -822,15 +1114,20 @@ function renderMaskItem(m){
     const checked=m.visible?'checked':'';
     const cl=m.confirmed?'✅ ':'⏳ ';
     const badgeClass=`mode-${m.mode.toLowerCase()}-badge`;
-    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}">
+    const warnStyle=m.overlapWarn?'border:2px solid #dc2626;background:#fef2f2;':'';
+    const warnNote=m.overlapWarn&&m.overlapWith&&m.overlapWith.length>0
+        ?`<div style="font-size:9px;color:#dc2626;margin-top:1px">⚠️ 与 ${m.overlapWith.map(o=>o.name).join(', ')} 重叠</div>`:'';
+    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}" style="${warnStyle}">
         <input type="checkbox" ${checked} class="mask-vis" style="width:14px;height:14px;cursor:pointer;">
         <span class="color-dot" style="background:${m.color}"></span>
         <div class="mask-info">
             <span class="inst-id">${m.instance_id}</span>
             <span class="mode-badge ${badgeClass}">${m.mode}</span>
             <span class="mask-score">${m.score.toFixed(3)}</span>
+            ${warnNote}
         </div>
         <div class="mask-actions">
+            ${m.mode==='D'?`<button class="edit-btn" data-id="${m.id}" title="Edit Polygon" onclick="polyEdit(${m.id})" style="background:none;border:1px solid #e5e7eb;border-radius:3px;cursor:pointer;font-size:10px;padding:1px 5px;margin-right:2px">✏️</button>`:''}
             <button class="del-btn mask-del" data-id="${m.id}" title="Delete">🗑</button>
         </div>
     </div>`;

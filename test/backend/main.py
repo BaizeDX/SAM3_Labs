@@ -190,31 +190,67 @@ class ExportRequest(BaseModel):
     masks: List[MaskItem]
 
 # =====================================================================
+# Image resize helper (avoid CUDA OOM on large images)
+# =====================================================================
+MAX_PIXELS = 1024 * 1024  # max megapixels before downscaling
+
+def _resize_for_sam(img):
+    """Downscale image if total pixels exceed MAX_PIXELS, return (resized_img, scale_x, scale_y)."""
+    w, h = img.size
+    pixels = w * h
+    if pixels <= MAX_PIXELS:
+        return img, 1.0, 1.0
+    ratio = (MAX_PIXELS / pixels) ** 0.5
+    new_w = int(w * ratio)
+    new_h = int(h * ratio)
+    logger.info(f"Downscaling {w}x{h} ({pixels/1e6:.1f}MP) → {new_w}x{new_h} for SAM3")
+    return img.resize((new_w, new_h), Image.LANCZOS), w / new_w, h / new_h
+
+def _scale_mask_to_orig(mask_np, orig_w, orig_h):
+    """Resize mask numpy array from model resolution back to original image size."""
+    from PIL import Image
+    mask_pil = Image.fromarray((mask_np * 255).astype(np.uint8))
+    mask_pil = mask_pil.resize((orig_w, orig_h), Image.NEAREST)
+    return np.array(mask_pil).astype(bool)
+
+# =====================================================================
 # SAM 3 inference core
 # =====================================================================
 
 def run_pure_text(img, text):
     """Mode A: pure text-prompt segmentation."""
-    state = processor.set_image(img)
+    img_resized, sx, sy = _resize_for_sam(img)
+    orig_w, orig_h = img.size
+    state = processor.set_image(img_resized)
     state = processor.set_text_prompt(prompt=text, state=state)
     masks = state["masks"]
     scores = state["scores"]
     results = []
     for i in range(len(masks)):
         mask_np = masks[i].squeeze().cpu().numpy()
+        if sx > 1 or sy > 1:
+            mask_np = _scale_mask_to_orig(mask_np, orig_w, orig_h)
         score = float(scores[i].item())
         results.append({"mask": mask_np, "score": score})
+    torch.cuda.empty_cache()
     return results
 
 
 def run_box_text_multi(img, text, box_px):
     """Mode B: box + text, return all masks."""
-    w, h = img.size
-    cx = ((box_px[0] + box_px[2]) / 2) / w
-    cy = ((box_px[1] + box_px[3]) / 2) / h
-    bw = (box_px[2] - box_px[0]) / w
-    bh = (box_px[3] - box_px[1]) / h
-    state = processor.set_image(img)
+    img_resized, sx, sy = _resize_for_sam(img)
+    orig_w, orig_h = img.size
+    w, h = img_resized.size
+
+    # Scale box from original coords to resized coords
+    bx1 = box_px[0] / sx; by1 = box_px[1] / sy
+    bx2 = box_px[2] / sx; by2 = box_px[3] / sy
+    cx = ((bx1 + bx2) / 2) / w
+    cy = ((by1 + by2) / 2) / h
+    bw = (bx2 - bx1) / w
+    bh = (by2 - by1) / h
+
+    state = processor.set_image(img_resized)
     state = processor.set_text_prompt(prompt=text, state=state)
     state = processor.add_geometric_prompt(box=[cx, cy, bw, bh], label=True, state=state)
     masks = state["masks"]
@@ -222,19 +258,29 @@ def run_box_text_multi(img, text, box_px):
     results = []
     for i in range(len(masks)):
         mask_np = masks[i].squeeze().cpu().numpy()
+        if sx > 1 or sy > 1:
+            mask_np = _scale_mask_to_orig(mask_np, orig_w, orig_h)
         score = float(scores[i].item())
         results.append({"mask": mask_np, "score": score})
+    torch.cuda.empty_cache()
     return results
 
 
 def run_box_text_single(img, text, box_px):
     """Mode C: box + text, return only the best mask."""
-    w, h = img.size
-    cx = ((box_px[0] + box_px[2]) / 2) / w
-    cy = ((box_px[1] + box_px[3]) / 2) / h
-    bw = (box_px[2] - box_px[0]) / w
-    bh = (box_px[3] - box_px[1]) / h
-    state = processor.set_image(img)
+    img_resized, sx, sy = _resize_for_sam(img)
+    orig_w, orig_h = img.size
+    w, h = img_resized.size
+
+    # Scale box from original coords to resized coords
+    bx1 = box_px[0] / sx; by1 = box_px[1] / sy
+    bx2 = box_px[2] / sx; by2 = box_px[3] / sy
+    cx = ((bx1 + bx2) / 2) / w
+    cy = ((by1 + by2) / 2) / h
+    bw = (bx2 - bx1) / w
+    bh = (by2 - by1) / h
+
+    state = processor.set_image(img_resized)
     state = processor.set_text_prompt(prompt=text, state=state)
     state = processor.add_geometric_prompt(box=[cx, cy, bw, bh], label=True, state=state)
     masks = state["masks"]
@@ -242,19 +288,21 @@ def run_box_text_single(img, text, box_px):
     # Pick the best mask
     best_idx = int(scores.argmax().item())
     mask_np = masks[best_idx].squeeze().cpu().numpy()
+    if sx > 1 or sy > 1:
+        mask_np = _scale_mask_to_orig(mask_np, orig_w, orig_h)
     score = float(scores[best_idx].item())
 
-    # Clip mask to box area + small margin (20px)
+    # Clip mask to box area + small margin (20px) — use ORIGINAL dimensions
     margin = 20
     x1, y1, x2, y2 = box_px
     x1c = max(0, int(x1 - margin))
     y1c = max(0, int(y1 - margin))
-    x2c = min(w, int(x2 + margin))
-    y2c = min(h, int(y2 + margin))
-    # Zero out pixels outside the box+margin region
+    x2c = min(orig_w, int(x2 + margin))
+    y2c = min(orig_h, int(y2 + margin))
     clipped = np.zeros_like(mask_np)
     clipped[y1c:y2c, x1c:x2c] = mask_np[y1c:y2c, x1c:x2c]
 
+    torch.cuda.empty_cache()
     return [{
         "mask": clipped,
         "score": score,
