@@ -68,6 +68,7 @@ OUTPUT_DIR = REPO_ROOT / "Outputs" / "LabABC_output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_PROMPTS_PATH = REPO_ROOT / "config" / "batch_prompts.txt"
+DEFAULT_PROMPTS_BC_PATH = REPO_ROOT / "config" / "batch_prompts_bc.txt"
 
 if not CKPT_PATH.exists():
     raise FileNotFoundError(f"Checkpoint not found: {CKPT_PATH}")
@@ -92,13 +93,38 @@ if DEFAULT_PROMPTS_PATH.exists():
     if loaded:
         mode_a_prompts = loaded
 
+# Default B/C-mode prompts (object-level concepts)
+mode_bc_prompts = [
+    "window",
+    "door",
+    "column",
+    "balcony",
+    "railing",
+    "lamp",
+    "signage",
+    "staircase",
+    "arch",
+    "gutter",
+]
+
+# Try load from config file
+if DEFAULT_PROMPTS_BC_PATH.exists():
+    loaded_bc = []
+    with open(DEFAULT_PROMPTS_BC_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                loaded_bc.append(line)
+    if loaded_bc:
+        mode_bc_prompts = loaded_bc
+
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
 image_files = sorted([f for f in os.listdir(INPUT_DIR)
                        if Path(f).suffix.lower() in IMAGE_EXTENSIONS])
 
 logger.info(f"Repo root: {REPO_ROOT}")
 logger.info(f"Images: {len(image_files)}")
-logger.info(f"Mode-A prompts: {len(mode_a_prompts)}")
+logger.info(f"Mode-A prompts: {len(mode_a_prompts)}, Mode-BC prompts: {len(mode_bc_prompts)}")
 
 # =====================================================================
 # Global model
@@ -274,6 +300,10 @@ async def get_image(image_id: str):
 @app.get("/api/config-prompts")
 async def get_prompts():
     return {"prompts": mode_a_prompts}
+
+@app.get("/api/config-prompts-bc")
+async def get_bc_prompts():
+    return {"prompts": mode_bc_prompts}
 
 # ---- Segmentation endpoints ----
 

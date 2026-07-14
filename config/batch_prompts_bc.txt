@@ -1,0 +1,8 @@
+# B/C Mode Segmentation Prompts (object-level concepts)
+# One prompt per line. Lines starting with # are ignored.
+
+swallowtail_ridge
+water_table
+door_frame
+relief
+pillar

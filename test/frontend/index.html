@@ -43,7 +43,13 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 
 /* Right panel */
 .side-panel{display:flex;flex-direction:column;gap:6px}
-.mask-list-card{background:#fff;border-radius:10px;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.08);max-height:520px;overflow-y:auto;display:flex;flex-direction:column}
+.mask-list-card{background:#fff;border-radius:10px;padding:8px 10px;box-shadow:0 1px 4px rgba(0,0,0,.08);max-height:65vh;overflow-y:auto;display:flex;flex-direction:column}
+.mask-scroll{flex:1;overflow-y:auto;max-height:55vh;font-size:12px}
+.mask-scroll .mask-item{padding:4px 6px;gap:4px;font-size:12px}
+.mask-scroll .mask-item .mask-info .inst-id{font-size:12px}
+.mask-scroll .mask-item .mask-info .mask-score{font-size:11px}
+.mask-scroll .eval-checkboxes label{font-size:10px}
+.mask-scroll .eval-checkboxes input{width:15px;height:15px}
 .mask-list-card h3{font-size:13px;color:#555;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .mask-list-card h3 small{color:#aaa;font-weight:400}
 
@@ -102,12 +108,22 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <div class="toolbar">
 <label>Image: <select id="imgSelect"><option>--</option></select></label>
 <span id="modeToolbarA"><label>Prompt: <select id="promptSelect"><option>loading</option></select></label></span>
-<span id="modeToolbarBC" class="hidden"><label>Text: <input type="text" id="textInput" value="swallowtail ridge"></label></span>
-<button class="btn btn-a" id="runBtn">▶ Run A</button>
-<button class="btn btn-sm btn-outline" id="clearBtn">🗑 Clear</button>
-<button class="btn btn-sm btn-primary" id="exportBtn">💾 Export</button>
-<span id="modeIndicator" style="font-size:11px;color:#888;margin-left:8px">Mode A</span>
-</div>
+<span id="modeToolbarBC" class="hidden" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:180px"></label>
+    <div id="bcPromptChips" class="prompt-list" style="margin:0;display:inline-flex"></div>
+</span>
+    <span id="segToolbar">
+    <button class="btn btn-a" id="runBtn">▶ Run A</button>
+    <button class="btn btn-sm btn-outline" id="clearBtn">🗑 Clear</button>
+    <button class="btn btn-sm btn-primary" id="exportBtn">💾 Export</button>
+    <span id="modeIndicator" style="font-size:11px;color:#888;margin-left:8px">Mode A</span>
+    </span>
+    <span id="evalExportBtn" class="hidden">
+    <button class="btn btn-sm btn-primary" onclick="exportEvalReport()">📊 Export Eval Report</button>
+    </span>
+    <button class="btn btn-sm btn-outline" style="margin-left:auto"
+        onclick="toggleWorkMode()" id="workModeBtn">📊 Eval Mode</button>
+    </div>
 
 <div class="main-grid">
 <div class="canvas-card">
@@ -194,7 +210,8 @@ Masks <small id="maskCount">(0)</small>
 const state={
     currentImageId:null, imageDataUrl:null, imgW:800, imgH:600,
     mode:'a',
-    masks:[],        // {id,instance_id,mode,text,score,mask_data,visible,box,color,confirmed}
+    workMode:'segment', // 'segment' | 'eval'
+    masks:[],        // {id,instance_id,mode,text,score,mask_data,visible,box,color,confirmed,batch,eval}
     nextMaskId:0,
     counters:{a:{},b:{},c:{}},
     isDrawBox:false, boxStart:null, boxEnd:null, currentBox:null,
@@ -234,6 +251,30 @@ async function apiPost(u,d){
 // =====================================================================
 let _labelEls=[];
 
+// Backdrop cache for box-drag performance (avoids Image() loading on every mousemove)
+let _backdropCvs = null;
+function getBackdropCvs() {
+    if (!_backdropCvs) _backdropCvs = document.createElement('canvas');
+    return _backdropCvs;
+}
+function cacheBackdrop() {
+    const bc = getBackdropCvs();
+    bc.width = canvas.width;
+    bc.height = canvas.height;
+    bc.getContext('2d').drawImage(canvas, 0, 0);
+}
+function quickRedraw() {
+    const bc = getBackdropCvs();
+    if (bc.width === 0 || bc.height === 0) { drawBox(); return; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bc, 0, 0);
+    drawBox();
+}
+
+/**
+ * Lightweight redraw for box-drag: blits cached backdrop, draws box overlay.
+ * Called on every mousemove during box drawing — avoids Image() creation.
+ */
 function fullRedraw(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     _labelEls.forEach(e=>e.remove());_labelEls=[];
@@ -241,8 +282,7 @@ function fullRedraw(){
     const img=new Image();
     img.onload=()=>{
         ctx.drawImage(img,0,0,canvas.width,canvas.height);
-        if(!state.showMasks){drawBox();drawAllLabels();return;}
-        // Highlight mask if selected
+        if(!state.showMasks){drawAllLabels();cacheBackdrop();drawBox();return;}
         let hlMask=null;
         if(state.highlightMaskId!==null){
             hlMask=state.masks.find(m=>m.id===state.highlightMaskId);
@@ -250,7 +290,7 @@ function fullRedraw(){
         // Draw unselected masks
         state.masks.forEach(m=>{
             if(!m.visible)return;
-            if(hlMask&&m.id===hlMask.id)return; // draw highlighted later
+            if(hlMask&&m.id===hlMask.id)return;
             drawMaskOnCanvas(m);
         });
         // Draw highlighted mask on top (brighter)
@@ -258,14 +298,17 @@ function fullRedraw(){
             const mi=new Image();
             mi.onload=()=>{
                 drawMaskImage(mi,hlMask.color,0.6);
-                // Draw bright border
                 drawHighlightBorder(hlMask);
                 drawAllLabels();
+                cacheBackdrop();
+                drawBox();
             };
             mi.src=hlMask.mask_data;
+        } else {
+            drawAllLabels();
+            cacheBackdrop();
+            drawBox();
         }
-        drawBox();
-        drawAllLabels();
     };
     img.src=state.imageDataUrl;
 }
@@ -462,7 +505,7 @@ canvas.addEventListener('mousemove',e=>{
             Math.min(state.boxStart.y,state.boxEnd.y)*s.sy,
             Math.max(state.boxStart.x,state.boxEnd.x)*s.sx,
             Math.max(state.boxStart.y,state.boxEnd.y)*s.sy];
-        fullRedraw();
+        quickRedraw();
     }
 });
 canvas.addEventListener('mouseup',e=>{
@@ -508,6 +551,20 @@ function toggleLabels(btn){
     fullRedraw();
 }
 
+// =====================================================================
+// Work mode: Segment / Eval
+// =====================================================================
+function toggleWorkMode(){
+    state.workMode=state.workMode==='segment'?'eval':'segment';
+    const isEval=state.workMode==='eval';
+    document.getElementById('evalExportBtn').classList.toggle('hidden',!isEval);
+    const btn=document.getElementById('workModeBtn');
+    btn.innerHTML=isEval?'🔧 Seg Mode':'📊 Eval Mode';
+    btn.style.background=isEval?'rgba(22,163,74,.15)':'rgba(37,99,235,.15)';
+    updateMaskList();
+    status(isEval?'📊 Evaluation mode: mark Under/Over/Boundary for each mask, drag IoU sliders':'🔧 Segmentation mode');
+}
+
 function toggleCompare(btn){
     state.showMasks=!state.showMasks;
     btn.textContent=state.showMasks?'👁 Compare':'👁 Original';
@@ -533,6 +590,7 @@ async function loadImage(id){
     state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{}};state.currentBox=null;state.highlightMaskId=null;
     updateMaskList();fullRedraw();status(`Loaded: ${id}`);
     loadPrompts();
+    loadPromptsBC();
 }
 document.getElementById('imgSelect').addEventListener('change',e=>{if(e.target.value)loadImage(e.target.value)});
 
@@ -548,6 +606,22 @@ async function loadPrompts(){
         chips.appendChild(c);
     });
     if(d.prompts.length>0){chips.firstChild.classList.add('selected');document.getElementById('promptSelect').value=d.prompts[0]}
+}
+
+async function loadPromptsBC(){
+    const d=await apiGet('/api/config-prompts-bc');
+    const chips=document.getElementById('bcPromptChips');
+    if(!chips)return;
+    chips.innerHTML='';
+    d.prompts.forEach(p=>{
+        const c=document.createElement('span');c.className='prompt-chip';c.textContent=p;
+        c.onclick=()=>{
+            document.getElementById('textInput').value=p;
+            chips.querySelectorAll('.prompt-chip').forEach(x=>x.classList.remove('selected'));
+            c.classList.add('selected');
+        };
+        chips.appendChild(c);
+    });
 }
 
 // =====================================================================
@@ -570,12 +644,15 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
         if(mode==='a')data=await apiPost('/api/segment-a',{image_id:state.currentImageId,text});
         else if(mode==='b')data=await apiPost('/api/segment-b',{image_id:state.currentImageId,text,box:state.currentBox});
         else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox});
+        const batchId=Date.now();
         (data.masks||[]).forEach(m=>{
             state.masks.push({
                 id:state.nextMaskId++,instance_id:getNextId(mode,text),
                 mode:mode.toUpperCase(),text,score:m.score,
                 mask_data:m.mask_data,visible:true,box:state.currentBox?[...state.currentBox]:null,
                 color:getColor(state.nextMaskId),confirmed:false,
+                batch:batchId,
+                eval:{underSeg:false,overSeg:false,boundary:false,iou:null},
             });
         });
         status(`✅ ${mode.toUpperCase()}: ${data.masks.length} masks (pending). Total: ${state.masks.length}`);
@@ -605,18 +682,127 @@ function updateMaskList(){
     if(state.masks.length===0){
         container.innerHTML='<div class="mask-empty">No masks yet.</div>';return;
     }
+
+    if(state.workMode==='eval'){
+        // ====== EVAL MODE ======
+        // Group by batch
+        const batches={};
+        state.masks.forEach(m=>{
+            const b=m.batch||'0';
+            if(!batches[b])batches[b]=[];
+            batches[b].push(m);
+        });
+        const batchKeys=Object.keys(batches).sort();
+        let html='<div class="mask-scroll">';
+        const allStats=[]; // per-mode stats accumulator
+        
+        batchKeys.forEach(batchId=>{
+            const items=batches[batchId];
+            const modeLabel=items[0].mode;
+            const timeStr=new Date(parseInt(batchId)).toLocaleTimeString();
+            const modeCount={a:0,b:0,c:0};
+            items.forEach(m=>modeCount[m.mode.toLowerCase()]++);
+            
+            html+=`<div class="section-label" style="font-size:11px;font-weight:600;color:#4f46e5">
+                Batch ${timeStr} (${modeLabel}) | ${items.length} masks</div>`;
+            
+            // Group by component within batch
+            const compGroups={};
+            items.forEach(m=>{const k=m.text;if(!compGroups[k])compGroups[k]=[];compGroups[k].push(m);});
+            for(const [comp,mitems] of Object.entries(compGroups)){
+                html+=`<div style="padding-left:4px;border-left:2px solid #e5e7eb;margin:2px 0">`;
+                html+=`<div style="font-size:10px;color:#888;padding:1px 0">${comp} (${mitems.length})</div>`;
+                mitems.forEach(m=>{html+=renderEvalMaskItem(m);});
+                html+=`</div>`;
+            }
+            // Batch stats
+            const total=items.length;
+            const uRate=items.filter(x=>x.eval.underSeg).length/total*100;
+            const oRate=items.filter(x=>x.eval.overSeg).length/total*100;
+            const bRate=items.filter(x=>x.eval.boundary).length/total*100;
+            const mRate=items.filter(x=>x.eval.mislabel).length/total*100;
+            html+=`<div style="font-size:10px;color:#666;padding:2px 4px 4px">
+                📊 欠:${uRate.toFixed(0)}% 过:${oRate.toFixed(0)}% 边界:${bRate.toFixed(0)}% 误标:${mRate.toFixed(0)}%
+                </div>`;
+        });
+        html+='</div>';
+        // Summary table at bottom
+        html+=renderEvalSummaryTable();
+        container.innerHTML=html;
+        
+        // Bind events for eval mode
+        container.querySelectorAll('.eval-under').forEach(cb=>{
+            cb.addEventListener('change',e=>{
+                const id=parseInt(e.target.dataset.id);
+                const m=state.masks.find(x=>x.id===id);
+                if(m)m.eval.underSeg=e.target.checked;
+                updateMaskList();
+            });
+        });
+        container.querySelectorAll('.eval-over').forEach(cb=>{
+            cb.addEventListener('change',e=>{
+                const id=parseInt(e.target.dataset.id);
+                const m=state.masks.find(x=>x.id===id);
+                if(m)m.eval.overSeg=e.target.checked;
+                updateMaskList();
+            });
+        });
+        container.querySelectorAll('.eval-boundary').forEach(cb=>{
+            cb.addEventListener('change',e=>{
+                const id=parseInt(e.target.dataset.id);
+                const m=state.masks.find(x=>x.id===id);
+                if(m)m.eval.boundary=e.target.checked;
+                updateMaskList();
+            });
+        });
+        container.querySelectorAll('.eval-mislabel').forEach(cb=>{
+            cb.addEventListener('change',e=>{
+                const id=parseInt(e.target.dataset.id);
+                const m=state.masks.find(x=>x.id===id);
+                if(m)m.eval.mislabel=e.target.checked;
+                updateMaskList();
+            });
+        });
+        // Visibility toggle (checkbox)
+        container.querySelectorAll('.mask-vis').forEach(cb=>{
+            cb.addEventListener('change',e=>{
+                const id=parseInt(e.target.closest('.mask-item').dataset.id);
+                const m=state.masks.find(x=>x.id===id);
+                if(m){m.visible=e.target.checked;fullRedraw();}
+            });
+        });
+        // Delete button
+        container.querySelectorAll('.mask-del').forEach(btn=>{
+            btn.addEventListener('click',e=>{
+                e.stopPropagation();
+                const id=parseInt(btn.dataset.id);
+                state.masks=state.masks.filter(m=>m.id!==id);
+                if(state.highlightMaskId===id)state.highlightMaskId=null;
+                updateMaskList();fullRedraw();
+            });
+        });
+        // Click mask item to highlight (same as seg mode)
+        container.querySelectorAll('.mask-item').forEach(el=>{
+            el.addEventListener('click',function(e){
+                if(e.target.closest('input')||e.target.closest('button'))return;
+                const id=parseInt(this.dataset.id);
+                highlightMask(id);
+            });
+        });
+        return;
+    }
+
+    // ====== SEGMENT MODE (existing) ======
     const hasPending=state.masks.some(m=>!m.confirmed);
     const sorted=getSortedMasks();
     const confirmed=sorted.filter(m=>m.confirmed);
     const pending=sorted.filter(m=>!m.confirmed);
     
     let html='';
-    // Confirmed section (collapsible)
     if(confirmed.length>0){
         html+=`<div class="section-label" style="cursor:pointer;user-select:none" onclick="toggleCollapse('confirmedGroup')">
             <span>▶ </span>✅ Confirmed (${confirmed.length})</div>
             <div id="confirmedGroup">`;
-        // Group by component name within confirmed
         const groups={};
         confirmed.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
         for(const [comp,items] of Object.entries(groups)){
@@ -627,10 +813,8 @@ function updateMaskList(){
         }
         html+=`</div>`;
     }
-    // Pending section
     if(pending.length>0){
         html+=`<div class="section-label">⏳ Pending (${pending.length})`;
-        // Group by component
         const groups={};
         pending.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
         for(const [comp,items] of Object.entries(groups)){
@@ -859,6 +1043,162 @@ function openFullSize(){
 function closeFullSize(){
     document.getElementById('fullSizeModal').style.display='none';
     document.body.style.overflow='';
+}
+
+// =====================================================================
+// Eval mode: render eval mask item
+// =====================================================================
+function renderEvalMaskItem(m){
+    const u=m.eval.underSeg?'checked':'';
+    const o=m.eval.overSeg?'checked':'';
+    const bo=m.eval.boundary?'checked':'';
+    const mi=m.eval.mislabel?'checked':'';
+    const badgeClass=`mode-${m.mode.toLowerCase()}-badge`;
+    const checked=m.visible?'checked':'';
+    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}">
+        <input type="checkbox" ${checked} class="mask-vis" style="width:14px;height:14px;cursor:pointer;">
+        <span class="color-dot" style="background:${m.color}"></span>
+        <div class="mask-info" style="flex:1;min-width:0">
+            <span class="inst-id">${m.instance_id}</span>
+            <span class="mode-badge ${badgeClass}">${m.mode}</span>
+            <span class="mask-score">${m.score.toFixed(3)}</span>
+        </div>
+        <div class="eval-checkboxes" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;font-size:10px">
+            <label style="font-size:10px;cursor:pointer"><input type="checkbox" class="eval-under" data-id="${m.id}" ${u}>欠</label>
+            <label style="font-size:10px;cursor:pointer"><input type="checkbox" class="eval-over" data-id="${m.id}" ${o}>过</label>
+            <label style="font-size:10px;cursor:pointer"><input type="checkbox" class="eval-boundary" data-id="${m.id}" ${bo}>边界</label>
+            <label style="font-size:10px;cursor:pointer"><input type="checkbox" class="eval-mislabel" data-id="${m.id}" ${mi}>误标</label>
+        </div>
+        <button class="del-btn mask-del" data-id="${m.id}" style="width:18px;height:18px;font-size:9px;padding:0;border:1px solid #e5e7eb;background:#fff;border-radius:3px;cursor:pointer" title="Delete">🗑</button>
+    </div>`;
+}
+
+// =====================================================================
+// Eval: summary table
+// =====================================================================
+function renderEvalSummaryTable(){
+    const modes=['A','B','C'];
+    let html='<hr style="margin:6px 0;border:none;border-top:1px solid #ddd">';
+    html+='<div style="font-size:11px;font-weight:600;color:#333;padding:2px 4px">Summary by Mode</div>';
+    html+='<table style="width:100%;font-size:10px;border-collapse:collapse">';
+    html+='<tr style="background:#f3f4f6"><th style="padding:2px 4px;text-align:left">模式</th>';
+    html+='<th style="padding:2px 4px;text-align:right">数量</th>';
+    html+='<th style="padding:2px 4px;text-align:right">欠%</th>';
+    html+='<th style="padding:2px 4px;text-align:right">过%</th>';
+    html+='<th style="padding:2px 4px;text-align:right">边界%</th>';
+    html+='<th style="padding:2px 4px;text-align:right">误标%</th></tr>';
+    
+    let grandTotal=0;
+    modes.forEach(modeLabel=>{
+        const items=state.masks.filter(m=>m.mode===modeLabel);
+        const total=items.length;
+        if(total===0)return;
+        grandTotal+=total;
+        const uRate=items.filter(x=>x.eval.underSeg).length/total*100;
+        const oRate=items.filter(x=>x.eval.overSeg).length/total*100;
+        const bRate=items.filter(x=>x.eval.boundary).length/total*100;
+        const mRate=items.filter(x=>x.eval.mislabel).length/total*100;
+        html+=`<tr><td style="padding:2px 4px;font-weight:600">${modeLabel}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${total}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${uRate.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${oRate.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${bRate.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${mRate.toFixed(1)}</td></tr>`;
+    });
+    
+    // Grand total row
+    if(grandTotal>0){
+        const allItems=state.masks;
+        const gU=allItems.filter(x=>x.eval.underSeg).length/grandTotal*100;
+        const gO=allItems.filter(x=>x.eval.overSeg).length/grandTotal*100;
+        const gB=allItems.filter(x=>x.eval.boundary).length/grandTotal*100;
+        const gM=allItems.filter(x=>x.eval.mislabel).length/grandTotal*100;
+        html+=`<tr style="background:#eef2ff;font-weight:600"><td style="padding:2px 4px">总计</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${grandTotal}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${gU.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${gO.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${gB.toFixed(1)}</td>`;
+        html+=`<td style="padding:2px 4px;text-align:right">${gM.toFixed(1)}</td></tr>`;
+    }
+    html+='</table>';
+    return html;
+}
+
+// =====================================================================
+// Eval: export report
+// =====================================================================
+function exportEvalReport(){
+    const report={
+        image_id:state.currentImageId,
+        timestamp:new Date().toISOString(),
+        total_masks:state.masks.length,
+        by_mode:{},
+        by_batch:{},
+        detail:[],
+    };
+    
+    // By batch
+    const batches={};
+    state.masks.forEach(m=>{
+        const b=m.batch||'0';
+        if(!batches[b])batches[b]=[];
+        batches[b].push(m);
+    });
+    for(const [bid,items] of Object.entries(batches)){
+        const total=items.length;
+        report.by_batch[bid]={
+            time:new Date(parseInt(bid)).toLocaleTimeString(),
+            mode:items[0].mode,
+            count:total,
+            underSeg:items.filter(x=>x.eval.underSeg).length,
+            overSeg:items.filter(x=>x.eval.overSeg).length,
+            boundary:items.filter(x=>x.eval.boundary).length,
+            underRate:total>0?(items.filter(x=>x.eval.underSeg).length/total*100).toFixed(1):'0',
+            overRate:total>0?(items.filter(x=>x.eval.overSeg).length/total*100).toFixed(1):'0',
+            boundaryRate:total>0?(items.filter(x=>x.eval.boundary).length/total*100).toFixed(1):'0',
+            avgIoU:items.filter(x=>x.eval.iou!==null).length>0
+                ?(items.filter(x=>x.eval.iou!==null).reduce((a,b)=>a+b.eval.iou,0)/items.filter(x=>x.eval.iou!==null).length).toFixed(1):'-',
+        };
+    }
+    
+    // By mode
+    ['A','B','C'].forEach(modeLabel=>{
+        const items=state.masks.filter(m=>m.mode===modeLabel);
+        const total=items.length;
+        if(total===0)return;
+        report.by_mode[modeLabel]={
+            count:total,
+            underSeg:items.filter(x=>x.eval.underSeg).length,
+            overSeg:items.filter(x=>x.eval.overSeg).length,
+            boundary:items.filter(x=>x.eval.boundary).length,
+            underRate:total>0?(items.filter(x=>x.eval.underSeg).length/total*100).toFixed(1):'0',
+            overRate:total>0?(items.filter(x=>x.eval.overSeg).length/total*100).toFixed(1):'0',
+            boundaryRate:total>0?(items.filter(x=>x.eval.boundary).length/total*100).toFixed(1):'0',
+            avgIoU:items.filter(x=>x.eval.iou!==null).length>0
+                ?(items.filter(x=>x.eval.iou!==null).reduce((a,b)=>a+b.eval.iou,0)/items.filter(x=>x.eval.iou!==null).length).toFixed(1):'-',
+        };
+    });
+    
+    // Detail
+    state.masks.forEach(m=>{
+        report.detail.push({
+            instance_id:m.instance_id,
+            mode:m.mode,
+            text:m.text,
+            score:m.score,
+            batch:m.batch,
+            eval:JSON.parse(JSON.stringify(m.eval)),
+        });
+    });
+    
+    // Download JSON
+    const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=`eval_${state.currentImageId}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    status(`📊 Evaluation report downloaded (${report.detail.length} masks)`);
 }
 switchMode('a');
 loadImages();

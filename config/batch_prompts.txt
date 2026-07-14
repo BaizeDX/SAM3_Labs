@@ -6,5 +6,7 @@ window
 door
 roof
 wall
+sky
+ground
 
 
