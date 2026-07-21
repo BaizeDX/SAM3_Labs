@@ -36,7 +36,7 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 .main-grid{display:grid;grid-template-columns:1fr 350px;gap:10px}
 
 /* Canvas */
-.canvas-card{background:#fff;border-radius:10px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.canvas-card{background:#fff;border-radius:10px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}
 .canvas-wrapper{position:relative;display:inline-block}
 #imageCanvas{border:1px solid #e5e7eb;border-radius:6px;cursor:crosshair;display:block;background:#f9fafb}
 .coord-display{position:absolute;bottom:3px;left:5px;background:rgba(0,0,0,.7);color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none}
@@ -87,6 +87,15 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 /* Push bar */
 .push-bar{display:flex;gap:4px;padding:4px 0;border-top:1px solid #eee;margin-top:4px}
 .hidden{display:none!important}
+
+/* Fullscreen canvas */
+.canvas-card.fullscreen{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9997;border-radius:0;padding:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center}
+.canvas-card.fullscreen .canvas-wrapper{display:flex;align-items:center;justify-content:center}
+.canvas-card.fullscreen .coord-display{display:block!important}
+.canvas-card.fullscreen .fullscreen-exit-btn{display:block!important}
+.fullscreen-exit-btn{display:none!important}
+.canvas-card.fullscreen #imageCanvas{border:none;border-radius:0}
+.canvas-card.fullscreen .toolbar{display:none}
 
 .status-card{background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .status-card .status-title{font-size:11px;color:#888;margin-bottom:2px}
@@ -142,6 +151,9 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <button style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;
     border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
     z-index:10;" onclick="openFullSize()">🔍 Full Size</button>
+<button style="position:absolute;top:4px;right:192px;background:rgba(0,0,0,.6);color:#fff;
+    border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
+    z-index:10;" id="fullScreenBtn" onclick="toggleFullscreenCanvas()">⛶ 全屏</button>
 <button style="position:absolute;top:4px;right:100px;background:rgba(0,0,0,.6);color:#fff;
     border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;
     z-index:10;" id="labelsToggleBtn" onclick="toggleLabels(this)">🏷 Labels ON</button>
@@ -231,6 +243,10 @@ const state={
     highlightMaskId:null,
     // Alias mode (use alias as instance_id instead of search term)
     useAlias:true,
+    fullscreenCanvas:false,  // when true, canvas fills entire viewport
+    canvasZoom:1,         // wheel zoom multiplier (1 = fit-to-viewport)
+    minCanvasScale:null,   // base scale set by loadImage (for reset)
+    panX:0,panY:0,isPanning:false,panStartX:0,panStartY:0,
     // Negative boxes (right-click drag)
     negativeBoxes:[],    // [[x1,y1,x2,y2], ...] negative boxes in image coords
     drawingNegBox:false, negBoxStart:null, negBoxEnd:null,
@@ -702,6 +718,8 @@ canvas.addEventListener('mousedown',e=>{
     if(state.mode==='a')return;
     const r=canvas.getBoundingClientRect();
     const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    // Middle-click: start pan
+    if(e.button===1){state.isPanning=true;state.panStartX=e.clientX-state.panX;state.panStartY=e.clientY-state.panY;return;}
     // Right-click: start negative box drag
     if(e.button===2&&(state.mode==='b'||state.mode==='c')){
         state.drawingNegBox=true;state.negBoxStart={x:cx,y:cy};state.negBoxEnd={x:cx,y:cy};
@@ -741,6 +759,11 @@ canvas.addEventListener('mousemove',e=>{
     const cx=e.clientX-r.left,cy=e.clientY-r.top;
     const img=canvasToImg(cx,cy);
     document.getElementById('coordDisplay').textContent=`x:${Math.round(img.x)} y:${Math.round(img.y)}`;
+    if(state.isPanning){
+        state.panX=e.clientX-state.panStartX;state.panY=e.clientY-state.panStartY;
+        document.querySelector('.canvas-wrapper').style.transform=`translate(${state.panX}px,${state.panY}px)`;
+        return;
+    }
     if(state.mode==='d'){
         state.polyMousePos={x:img.x,y:img.y};
         if(state.draggingVertex>=0&&state.polygon&&state.draggingVertex<state.polygon.length){
@@ -771,6 +794,7 @@ canvas.addEventListener('mousemove',e=>{
     }
 });
 canvas.addEventListener('mouseup',e=>{
+    if(e.button===1){state.isPanning=false;return;}
     if(state.mode==='d'){
         state.draggingVertex=-1;
         return;
@@ -807,6 +831,20 @@ canvas.addEventListener('mouseleave',()=>{
     state.draggingVertex=-1;
 });
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('wheel',e=>{
+    e.preventDefault();
+    if(!state.minCanvasScale||!state.fullscreenCanvas)return;
+    const dir=e.deltaY>0?-0.15:0.15;
+    state.canvasZoom=Math.max(0.15,Math.min(5,state.canvasZoom+dir));
+    _resizeCanvasFullscreen();
+    status(`🔍 ${Math.round(state.canvasZoom*100)}%`);
+},{passive:false});
+document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&state.fullscreenCanvas){toggleFullscreenCanvas();return;}
+    if(e.key==='0'&&state.fullscreenCanvas){
+        state.canvasZoom=1;_resizeCanvasFullscreen();status(`🔍 100%`);
+    }
+});
 // =====================================================================
 // Mode switching
 // =====================================================================
@@ -831,6 +869,39 @@ function switchMode(mode){
     if(mode!=='d'){state.polygon=null;state.draggingVertex=-1;state.polyMousePos=null;}
     if(mode!=='b'&&mode!=='c'){state.negativeBoxes=[];}
     status(`Switched to ${ind[mode]}`);
+}
+
+function toggleFullscreenCanvas(){
+    state.fullscreenCanvas=!state.fullscreenCanvas;
+    const card=document.querySelector('.canvas-card');
+    const container=document.querySelector('.container');
+    card.classList.toggle('fullscreen',state.fullscreenCanvas);
+    document.getElementById('fullScreenBtn').textContent=state.fullscreenCanvas?'✕ 退出':'⛶ 全屏';
+    if(state.fullscreenCanvas){
+        state._savedScrollY=window.scrollY;
+        _resizeCanvasFullscreen();
+        window.addEventListener('resize',_resizeCanvasFullscreen);
+    }else{
+        window.removeEventListener('resize',_resizeCanvasFullscreen);
+        state.canvasZoom=1;state.panX=0;state.panY=0;
+        document.querySelector('.canvas-wrapper').style.transform='';
+        if(state.minCanvasScale){
+            canvas.width=Math.round(state.imgW*state.minCanvasScale);
+            canvas.height=Math.round(state.imgH*state.minCanvasScale);
+            fullRedraw();
+        }else{fullRedraw();}
+        if(state._savedScrollY!==undefined)window.scrollTo(0,state._savedScrollY);
+    }
+}
+function _resizeCanvasFullscreen(){
+    if(!state.fullscreenCanvas||!state.currentImageId)return;
+    const vw=window.innerWidth-20,vh=window.innerHeight-20;
+    const imgRatio=state.imgW/state.imgH;
+    let cw,ch;
+    if(vw/vh>imgRatio){ch=vh;cw=ch*imgRatio;}
+    else{cw=vw;ch=cw/imgRatio;}
+    canvas.width=Math.round(cw*state.canvasZoom);canvas.height=Math.round(ch*state.canvasZoom);
+    fullRedraw();
 }
 
 function toggleLabels(btn){
@@ -876,6 +947,7 @@ async function loadImage(id){
     state.currentImageId=id;state.imageDataUrl=d.data_url;state.imgW=d.width;state.imgH=d.height;
     const sc=Math.min(800/d.width,600/d.height);
     canvas.width=Math.round(d.width*sc);canvas.height=Math.round(d.height*sc);
+    state.minCanvasScale=sc;state.canvasZoom=1;
     state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;state.negativeBoxes=[];
     updateMaskList();fullRedraw();status(`Loaded: ${id}`);
     loadPrompts();
