@@ -110,8 +110,9 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 <label>Image: <select id="imgSelect"><option>--</option></select></label>
 <span id="modeToolbarA"><label>Prompt: <select id="promptSelect"><option>loading</option></select></label></span>
 <span id="modeToolbarBC" class="hidden" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
-    <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:180px"></label>
-    <span onclick="toggleBCPresets()" style="font-size:11px;cursor:pointer;color:#888;user-select:none;white-space:nowrap" id="bcToggleBtn">▼ 预制标签</span>
+    <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:160px" placeholder="搜索词"></label>
+    <label>Alias: <input type="text" id="aliasInput" style="width:120px" placeholder="标注名（可选）"></label>
+    <label style="font-size:11px;color:#888;cursor:pointer;user-select:none"><input type="checkbox" id="aliasCheck" checked onchange="state.useAlias=this.checked" style="width:13px;height:13px;cursor:pointer;vertical-align:middle"> 启用</label>
 </span>
 <span id="modeToolbarD" class="hidden" style="display:inline-flex;align-items:center;gap:4px">
     <button class="btn btn-sm btn-outline" onclick="polyUndo()" id="polyUndoBtn" disabled>↩ 撤销点</button>
@@ -149,9 +150,6 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 </div>
 <div id="notesDisplay" style="font-size:11px;color:#666;margin-top:4px"></div>
 <div id="promptChips" class="prompt-list"></div>
-<div id="bcPresetPanel" style="margin:4px 0;overflow:hidden;transition:max-height 0.25s ease">
-    <div id="bcPromptChips" class="prompt-list" style="margin:0"></div>
-</div>
 </div>
 
 <div class="side-panel">
@@ -230,6 +228,8 @@ const state={
     showLabels:true,
     showMasks:true,
     highlightMaskId:null,
+    // Alias mode (use alias as instance_id instead of search term)
+    useAlias:true,
     // Polygon drawing (Mode D)
     polygon:null,          // [{x,y},...] current polygon vertices (image coords)
     draggingVertex:-1,     // vertex index being dragged, -1=none
@@ -514,12 +514,15 @@ function polyClose(){
     try{
         if(!state.polygon||state.polygon.length<2){status('D: 至少需要2个顶点('+(state.polygon?state.polygon.length:0)+')');return;}
         const pts=[...state.polygon];
-        const text=document.getElementById('textInput').value.trim()||document.getElementById('promptSelect').value;
+        const ti=document.getElementById('textInput');
+        const text=ti.value.trim()||document.getElementById('promptSelect').value;
         if(!text){status('D: 请输入文本');return;}
+        const aliasVal=document.getElementById('aliasInput').value.trim();
+        const label=(state.useAlias&&aliasVal)?aliasVal:text;
         const maskData=polygonToMaskDataUrl(pts);
         const batchId=Date.now();
         state.masks.push({
-            id:state.nextMaskId++,instance_id:getNextId('d',text),
+            id:state.nextMaskId++,instance_id:getNextId('d',label),
             mode:'D',text,score:1.0,
             mask_data:maskData,visible:true,box:null,
             color:getColor(state.nextMaskId),confirmed:false,
@@ -796,19 +799,6 @@ function toggleWorkMode(){
     status(isEval?'📊 Evaluation mode: mark Under/Over/Boundary for each mask, drag IoU sliders':'🔧 Segmentation mode');
 }
 
-function toggleBCPresets(){
-    const panel=document.getElementById('bcPresetPanel');
-    const btn=document.getElementById('bcToggleBtn');
-    const isOpen=panel.style.maxHeight&&panel.style.maxHeight!=='0px';
-    if(isOpen){
-        panel.style.maxHeight='0px';
-        btn.textContent='▶ 预制标签';
-    }else{
-        panel.style.maxHeight=panel.scrollHeight+100+'px';
-        btn.textContent='▼ 预制标签';
-    }
-}
-
 function toggleCompare(btn){
     state.showMasks=!state.showMasks;
     btn.textContent=state.showMasks?'👁 Compare':'👁 Original';
@@ -834,7 +824,6 @@ async function loadImage(id){
     state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;
     updateMaskList();fullRedraw();status(`Loaded: ${id}`);
     loadPrompts();
-    loadPromptsBC();
 }
 document.getElementById('imgSelect').addEventListener('change',e=>{if(e.target.value)loadImage(e.target.value)});
 
@@ -852,21 +841,7 @@ async function loadPrompts(){
     if(d.prompts.length>0){chips.firstChild.classList.add('selected');document.getElementById('promptSelect').value=d.prompts[0]}
 }
 
-async function loadPromptsBC(){
-    const d=await apiGet('/api/config-prompts-bc');
-    const chips=document.getElementById('bcPromptChips');
-    if(!chips)return;
-    chips.innerHTML='';
-    d.prompts.forEach(p=>{
-        const c=document.createElement('span');c.className='prompt-chip';c.textContent=p;
-        c.onclick=()=>{
-            document.getElementById('textInput').value=p;
-            chips.querySelectorAll('.prompt-chip').forEach(x=>x.classList.remove('selected'));
-            c.classList.add('selected');
-        };
-        chips.appendChild(c);
-    });
-}
+
 
 // =====================================================================
 // Run segmentation
@@ -889,9 +864,11 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
         else if(mode==='b')data=await apiPost('/api/segment-b',{image_id:state.currentImageId,text,box:state.currentBox});
         else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox});
         const batchId=Date.now();
+        const aliasVal=document.getElementById('aliasInput').value.trim();
+        const label=(state.useAlias&&aliasVal)?aliasVal:text;
         (data.masks||[]).forEach(m=>{
             state.masks.push({
-                id:state.nextMaskId++,instance_id:getNextId(mode,text),
+                id:state.nextMaskId++,instance_id:getNextId(mode,label),
                 mode:mode.toUpperCase(),text,score:m.score,
                 mask_data:m.mask_data,visible:true,box:state.currentBox?[...state.currentBox]:null,
                 color:getColor(state.nextMaskId),confirmed:false,

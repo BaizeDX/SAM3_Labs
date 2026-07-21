@@ -1,10 +1,12 @@
 # B/C Mode Segmentation Prompts (object-level concepts)
 # One prompt per line. Lines starting with # are ignored.
+# Format: search_term or search_term=alias (alias is displayed in chips and used for instance_id)
 
-swallowtail_ridge
-water_table
-door_frame
-relief
+屋檐=燕尾檐
+窗扇=窗棂
+浮雕=石浮雕
 pillar
+door_frame
+water_table
 waterwheel_blockage
 roof_ridge
