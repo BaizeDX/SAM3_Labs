@@ -113,6 +113,7 @@ h1 small{font-size:12px;color:#888;font-weight:400}
     <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:160px" placeholder="搜索词"></label>
     <label>Alias: <input type="text" id="aliasInput" style="width:120px" placeholder="标注名（可选）"></label>
     <label style="font-size:11px;color:#888;cursor:pointer;user-select:none"><input type="checkbox" id="aliasCheck" checked onchange="state.useAlias=this.checked" style="width:13px;height:13px;cursor:pointer;vertical-align:middle"> 启用</label>
+    <button class="btn btn-sm btn-outline" onclick="clearNegBoxes()" style="font-size:10px;padding:1px 6px;color:#dc2626">🗑 负框</button>
 </span>
 <span id="modeToolbarD" class="hidden" style="display:inline-flex;align-items:center;gap:4px">
     <button class="btn btn-sm btn-outline" onclick="polyUndo()" id="polyUndoBtn" disabled>↩ 撤销点</button>
@@ -230,6 +231,9 @@ const state={
     highlightMaskId:null,
     // Alias mode (use alias as instance_id instead of search term)
     useAlias:true,
+    // Negative boxes (right-click drag)
+    negativeBoxes:[],    // [[x1,y1,x2,y2], ...] negative boxes in image coords
+    drawingNegBox:false, negBoxStart:null, negBoxEnd:null,
     // Polygon drawing (Mode D)
     polygon:null,          // [{x,y},...] current polygon vertices (image coords)
     draggingVertex:-1,     // vertex index being dragged, -1=none
@@ -381,13 +385,41 @@ function drawHighlightBorder(m){
     mi.src=m.mask_data;
 }
 
+function clearNegBoxes(){
+    state.negativeBoxes=[];state.drawingNegBox=false;
+    state.negBoxStart=null;state.negBoxEnd=null;
+    fullRedraw();
+}
+
+
 function drawBox(){
-    if(!state.currentBox)return;
-    const s=getScale();const[x1,y1,x2,y2]=state.currentBox;
-    const cx1=x1/s.sx,cy1=y1/s.sy,cx2=x2/s.sx,cy2=y2/s.sy;
-    const color=state.mode==='c'?'#dc2626':'#16a34a';
-    ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([6,4]);
-    ctx.strokeRect(cx1,cy1,cx2-cx1,cy2-cy1);ctx.setLineDash([]);
+    // Draw positive box
+    if(state.currentBox){
+        const s=getScale();const[x1,y1,x2,y2]=state.currentBox;
+        const cx1=x1/s.sx,cy1=y1/s.sy,cx2=x2/s.sx,cy2=y2/s.sy;
+        const color=state.mode==='c'?'#dc2626':'#16a34a';
+        ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([6,4]);
+        ctx.strokeRect(cx1,cy1,cx2-cx1,cy2-cy1);ctx.setLineDash([]);
+    }
+    // Draw negative boxes (blue dashed)
+    const s=getScale();
+    state.negativeBoxes.forEach(b=>{
+        const[nx1,ny1,nx2,ny2]=b;
+        ctx.strokeStyle='#2563eb';ctx.lineWidth=2;ctx.setLineDash([4,4]);
+        ctx.strokeRect(nx1/s.sx,ny1/s.sy,(nx2-nx1)/s.sx,(ny2-ny1)/s.sy);ctx.setLineDash([]);
+        ctx.fillStyle='#2563eb';ctx.font='bold 12px sans-serif';
+        ctx.fillText('−',nx1/s.sx+3,ny1/s.sy+14);
+    });
+    // Draw in-progress negative box
+    if(state.drawingNegBox&&state.negBoxStart&&state.negBoxEnd){
+        const x1=Math.min(state.negBoxStart.x,state.negBoxEnd.x)*s.sx;
+        const y1=Math.min(state.negBoxStart.y,state.negBoxEnd.y)*s.sy;
+        const x2=Math.max(state.negBoxStart.x,state.negBoxEnd.x)*s.sx;
+        const y2=Math.max(state.negBoxStart.y,state.negBoxEnd.y)*s.sy;
+        ctx.strokeStyle='#2563eb';ctx.lineWidth=2;ctx.setLineDash([4,4]);
+        ctx.strokeRect(x1/s.sx,y1/s.sy,(x2-x1)/s.sx,(y2-y1)/s.sy);ctx.setLineDash([]);
+    }
+
 }
 
 function computeCentroid(maskDataUrl){
@@ -588,6 +620,9 @@ function drawPolygonOverlay(){
 }
 
 // =====================================================================
+// Positive/Negative point rendering
+// =====================================================================
+// =====================================================================
 // Mask overlap detection (warn if new mask overlaps existing masks)
 // =====================================================================
 const OVERLAP_WARN_IOU = 0.10;  // IoU >= 10% triggers warning
@@ -667,6 +702,11 @@ canvas.addEventListener('mousedown',e=>{
     if(state.mode==='a')return;
     const r=canvas.getBoundingClientRect();
     const cx=e.clientX-r.left,cy=e.clientY-r.top;
+    // Right-click: start negative box drag
+    if(e.button===2&&(state.mode==='b'||state.mode==='c')){
+        state.drawingNegBox=true;state.negBoxStart={x:cx,y:cy};state.negBoxEnd={x:cx,y:cy};
+        return;
+    }
     if(state.mode==='d'){
         if(state.polygon&&state.polygon.length>0){
             const s=getScale();
@@ -716,6 +756,9 @@ canvas.addEventListener('mousemove',e=>{
         }
         return;
     }
+    if(state.drawingNegBox){
+        state.negBoxEnd={x:cx,y:cy};quickRedraw();return;
+    }
     if(state.isDrawBox&&state.boxStart){
         state.boxEnd={x:cx,y:cy};
         const s=getScale();
@@ -731,6 +774,17 @@ canvas.addEventListener('mouseup',e=>{
     if(state.mode==='d'){
         state.draggingVertex=-1;
         return;
+    }
+    // Finalize negative box
+    if(state.drawingNegBox&&state.negBoxStart&&state.negBoxEnd){
+        const s=getScale();
+        const bx1=Math.min(state.negBoxStart.x,state.negBoxEnd.x)*s.sx;
+        const by1=Math.min(state.negBoxStart.y,state.negBoxEnd.y)*s.sy;
+        const bx2=Math.max(state.negBoxStart.x,state.negBoxEnd.x)*s.sx;
+        const by2=Math.max(state.negBoxStart.y,state.negBoxEnd.y)*s.sy;
+        state.drawingNegBox=false;
+        if(Math.abs(bx2-bx1)>5||Math.abs(by2-by1)>5)state.negativeBoxes.push([bx1,by1,bx2,by2]);
+        fullRedraw();return;
     }
     if(!state.isDrawBox)return;
     state.isDrawBox=false;
@@ -752,7 +806,7 @@ canvas.addEventListener('mouseleave',()=>{
     state.polyMousePos=null;
     state.draggingVertex=-1;
 });
-
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
 // =====================================================================
 // Mode switching
 // =====================================================================
@@ -775,6 +829,7 @@ function switchMode(mode){
     canvas.style.cursor=mode==='a'?'default':'crosshair';
     // Clear polygon state when leaving D mode
     if(mode!=='d'){state.polygon=null;state.draggingVertex=-1;state.polyMousePos=null;}
+    if(mode!=='b'&&mode!=='c'){state.negativeBoxes=[];}
     status(`Switched to ${ind[mode]}`);
 }
 
@@ -821,7 +876,7 @@ async function loadImage(id){
     state.currentImageId=id;state.imageDataUrl=d.data_url;state.imgW=d.width;state.imgH=d.height;
     const sc=Math.min(800/d.width,600/d.height);
     canvas.width=Math.round(d.width*sc);canvas.height=Math.round(d.height*sc);
-    state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;
+    state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;state.negativeBoxes=[];
     updateMaskList();fullRedraw();status(`Loaded: ${id}`);
     loadPrompts();
 }
@@ -861,8 +916,10 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
     try{
         let data;
         if(mode==='a')data=await apiPost('/api/segment-a',{image_id:state.currentImageId,text});
-        else if(mode==='b')data=await apiPost('/api/segment-b',{image_id:state.currentImageId,text,box:state.currentBox});
-        else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox});
+        else if(mode==='b')data=await apiPost('/api/segment-b',{image_id:state.currentImageId,text,box:state.currentBox,
+            negative_boxes:state.negativeBoxes.length?state.negativeBoxes:undefined});
+        else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox,
+            negative_boxes:state.negativeBoxes.length?state.negativeBoxes:undefined});
         const batchId=Date.now();
         const aliasVal=document.getElementById('aliasInput').value.trim();
         const label=(state.useAlias&&aliasVal)?aliasVal:text;

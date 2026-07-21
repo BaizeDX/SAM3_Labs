@@ -10,7 +10,7 @@ Usage:
   http://localhost:8501
 """
 
-import os, sys, json, base64, warnings, logging
+import os, sys, json, base64, warnings, logging, asyncio
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime
@@ -132,6 +132,8 @@ logger.info(f"Mode-A prompts: {len(mode_a_prompts)}, Mode-BC prompts: {len(mode_
 model = None
 processor = None
 device = "cpu"
+# GPU processing lock — serializes concurrent access to the shared processor
+_processing_lock = asyncio.Lock()
 
 
 def load_sam3():
@@ -174,11 +176,13 @@ class SegmentBRequest(BaseModel):
     image_id: str
     text: str
     box: List[float]  # [x1, y1, x2, y2] pixel coords
+    negative_boxes: Optional[List[List[float]]] = None  # [[x1,y1,x2,y2], ...] negative boxes (pixel coords)
 
 class SegmentCRequest(BaseModel):
     image_id: str
     text: str
     box: List[float]
+    negative_boxes: Optional[List[List[float]]] = None
 
 class MaskItem(BaseModel):
     instance_id: str
@@ -236,7 +240,19 @@ def run_pure_text(img, text):
     return results
 
 
-def run_box_text_multi(img, text, box_px):
+def _add_negative_boxes(state, neg_boxes, img_w, img_h):
+    """Add negative box prompts via model's add_geometric_prompt with label=False."""
+    if not neg_boxes: return state
+    for box_px in neg_boxes:
+        cx = ((box_px[0] + box_px[2]) / 2) / img_w
+        cy = ((box_px[1] + box_px[3]) / 2) / img_h
+        bw = (box_px[2] - box_px[0]) / img_w
+        bh = (box_px[3] - box_px[1]) / img_h
+        state = processor.add_geometric_prompt(box=[cx, cy, bw, bh], label=False, state=state)
+    return state
+
+
+def run_box_text_multi(img, text, box_px, neg_boxes=None):
     """Mode B: box + text, return all masks."""
     img_resized, sx, sy = _resize_for_sam(img)
     orig_w, orig_h = img.size
@@ -253,6 +269,7 @@ def run_box_text_multi(img, text, box_px):
     state = processor.set_image(img_resized)
     state = processor.set_text_prompt(prompt=text, state=state)
     state = processor.add_geometric_prompt(box=[cx, cy, bw, bh], label=True, state=state)
+    state = _add_negative_boxes(state, neg_boxes, w, h)
     masks = state["masks"]
     scores = state["scores"]
     results = []
@@ -266,7 +283,7 @@ def run_box_text_multi(img, text, box_px):
     return results
 
 
-def run_box_text_single(img, text, box_px):
+def run_box_text_single(img, text, box_px, neg_boxes=None):
     """Mode C: box + text, return only the best mask."""
     img_resized, sx, sy = _resize_for_sam(img)
     orig_w, orig_h = img.size
@@ -283,6 +300,7 @@ def run_box_text_single(img, text, box_px):
     state = processor.set_image(img_resized)
     state = processor.set_text_prompt(prompt=text, state=state)
     state = processor.add_geometric_prompt(box=[cx, cy, bw, bh], label=True, state=state)
+    state = _add_negative_boxes(state, neg_boxes, w, h)
     masks = state["masks"]
     scores = state["scores"]
     # Pick the best mask
@@ -359,71 +377,74 @@ async def get_bc_prompts():
 async def segment_a(req: SegmentARequest):
     if processor is None:
         raise HTTPException(500, "Model not loaded")
-    try:
-        img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
-        if not img_path.exists():
-            # Try to find by scanning all files
-            found = False
-            for f in image_files:
-                if Path(f).stem == req.image_id:
-                    img_path = INPUT_DIR / f
-                    found = True
-                    break
-            if not found:
-                raise HTTPException(404, f"Image {req.image_id} not found")
-        img = Image.open(img_path).convert("RGB")
-        results = run_pure_text(img, req.text)
-        return {"masks": [
-            {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
-            for r in results
-        ]}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Segment A failed")
-        raise HTTPException(500, str(e))
+    async with _processing_lock:
+        try:
+            img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
+            if not img_path.exists():
+                # Try to find by scanning all files
+                found = False
+                for f in image_files:
+                    if Path(f).stem == req.image_id:
+                        img_path = INPUT_DIR / f
+                        found = True
+                        break
+                if not found:
+                    raise HTTPException(404, f"Image {req.image_id} not found")
+            img = Image.open(img_path).convert("RGB")
+            results = run_pure_text(img, req.text)
+            return {"masks": [
+                {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
+                for r in results
+            ]}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Segment A failed")
+            raise HTTPException(500, str(e))
 
 @app.post("/api/segment-b")
 async def segment_b(req: SegmentBRequest):
     if processor is None:
         raise HTTPException(500, "Model not loaded")
-    try:
-        img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
-        if not img_path.exists():
-            for f in image_files:
-                if Path(f).stem == req.image_id:
-                    img_path = INPUT_DIR / f
-                    break
-        img = Image.open(img_path).convert("RGB")
-        results = run_box_text_multi(img, req.text, req.box)
-        return {"masks": [
-            {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
-            for r in results
-        ]}
-    except Exception as e:
-        logger.exception("Segment B failed")
-        raise HTTPException(500, str(e))
+    async with _processing_lock:
+        try:
+            img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
+            if not img_path.exists():
+                for f in image_files:
+                    if Path(f).stem == req.image_id:
+                        img_path = INPUT_DIR / f
+                        break
+            img = Image.open(img_path).convert("RGB")
+            results = run_box_text_multi(img, req.text, req.box, neg_boxes=req.negative_boxes)
+            return {"masks": [
+                {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
+                for r in results
+            ]}
+        except Exception as e:
+            logger.exception("Segment B failed")
+            raise HTTPException(500, str(e))
 
 @app.post("/api/segment-c")
 async def segment_c(req: SegmentCRequest):
     if processor is None:
         raise HTTPException(500, "Model not loaded")
-    try:
-        img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
-        if not img_path.exists():
-            for f in image_files:
-                if Path(f).stem == req.image_id:
-                    img_path = INPUT_DIR / f
-                    break
-        img = Image.open(img_path).convert("RGB")
-        results = run_box_text_single(img, req.text, req.box)
-        return {"masks": [
-            {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
-            for r in results
-        ]}
-    except Exception as e:
-        logger.exception("Segment C failed")
-        raise HTTPException(500, str(e))
+    async with _processing_lock:
+        try:
+            img_path = INPUT_DIR / f"{req.image_id}_RawImage.png"
+            if not img_path.exists():
+                for f in image_files:
+                    if Path(f).stem == req.image_id:
+                        img_path = INPUT_DIR / f
+                        break
+            img = Image.open(img_path).convert("RGB")
+            results = run_box_text_single(img, req.text, req.box, neg_boxes=req.negative_boxes)
+            return {"masks": [
+                {"score": r["score"], "mask_data": mask_to_b64(r["mask"])}
+                for r in results
+            ]}
+        except Exception as e:
+            logger.exception("Segment C failed")
+            raise HTTPException(500, str(e))
 
 # ---- Export ----
 
