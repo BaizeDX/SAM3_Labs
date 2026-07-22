@@ -65,6 +65,7 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 .mask-item{display:flex;align-items:center;padding:3px 5px;border-radius:4px;margin-bottom:1px;gap:3px;font-size:11px;cursor:pointer;transition:background .1s}
 .mask-item:hover{background:#f0f0f0}
 .mask-item.highlighted{background:#eef2ff;outline:1px solid #4f46e5}
+.mask-item.merge-selected{background:#f5f3ff!important;outline:2px solid #7c3aed!important}
 .mask-item .color-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
 .mask-item .mask-info{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mask-item .inst-id{font-weight:600;font-size:11px}
@@ -117,7 +118,10 @@ h1 small{font-size:12px;color:#888;font-weight:400}
 
 <div class="toolbar">
 <label>Image: <select id="imgSelect"><option>--</option></select></label>
-<span id="modeToolbarA"><label>Prompt: <select id="promptSelect"><option>loading</option></select></label></span>
+<span id="modeToolbarA" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <label>Prompt: <select id="promptSelect"><option>loading</option></select></label>
+    <label>Alias: <input type="text" id="aliasInputA" style="width:120px" placeholder="标注名（可选）"></label>
+</span>
 <span id="modeToolbarBC" class="hidden" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <label>Text: <input type="text" id="textInput" value="swallowtail ridge" style="width:160px" placeholder="搜索词"></label>
     <label>Alias: <input type="text" id="aliasInput" style="width:120px" placeholder="标注名（可选）"></label>
@@ -162,12 +166,12 @@ h1 small{font-size:12px;color:#888;font-weight:400}
     z-index:10;" id="compareToggleBtn" onclick="toggleCompare(this)">👁 Compare</button>
 </div>
 <div id="notesDisplay" style="font-size:11px;color:#666;margin-top:4px"></div>
-<div id="promptChips" class="prompt-list"></div>
 </div>
 
 <div class="side-panel">
 <div class="mask-list-card">
 <h3>
+<span onclick="toggleMaskPanel()" style="cursor:pointer;user-select:none;font-size:13px;margin-right:4px" id="maskPanelToggle">◀</span>
 Masks <small id="maskCount">(0)</small>
 <select id="sortSelect" style="margin-left:auto;font-size:10px;padding:2px 4px;border:1px solid #ccc;border-radius:3px">
 <option value="id">Sort: ID#</option>
@@ -176,26 +180,46 @@ Masks <small id="maskCount">(0)</small>
 </select>
 </h3>
 
-<!-- Batch hide buttons -->
-<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
-<button class="btn btn-sm btn-outline" onclick="hideByMode('a')">Hide A</button>
-<button class="btn btn-sm btn-outline" onclick="hideByMode('b')">Hide B</button>
-<button class="btn btn-sm btn-outline" onclick="hideByMode('c')">Hide C</button>
-<button class="btn btn-sm btn-outline" onclick="hideConfirmed()">Hide Confirmed</button>
-<button class="btn btn-sm btn-outline" onclick="showAllMasks()">Show All</button>
+<!-- Batch hide/delete by annotation type -->
+<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px;font-size:10px;align-items:center">
+<select id="batchTypeSelect" style="font-size:10px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;max-width:120px">
+<option value="">—</option>
+</select>
+<button class="btn btn-sm btn-outline" onclick="hideByType()" title="Hide selected type">🙈 Hide</button>
+<button class="btn btn-sm btn-outline" onclick="deleteByType()" style="color:#dc2626" title="Delete selected type">🗑 Del</button>
+<span style="color:#ccc">|</span>
+<button class="btn btn-sm btn-outline" onclick="hideConfirmed()" title="Hide confirmed">🙈 ✓</button>
+<button class="btn btn-sm btn-outline" onclick="showAllMasks()">👁 All</button>
 </div>
 
 <div class="mask-scroll" id="maskListContainer"></div>
 
 <!-- Push to confirmed bar -->
 <div class="push-bar">
-<button class="btn btn-sm btn-a" id="pushBtn" onclick="pushToConfirmed()">📌 Push All Pending</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleMergeMode()" id="mergeBtn" style="color:#7c3aed">🔗 合并</button>
+    <button class="btn btn-sm btn-a" id="pushBtn" onclick="pushToConfirmed()">📌 Push All Pending</button>
+    <button class="btn btn-sm btn-outline hidden" onclick="cancelMerge()" id="mergeCancelBtn">✕ 取消</button>
 </div>
 </div>
 
 <div class="status-card">
 <div class="status-title">Status</div>
 <div class="status-msg" id="statusMsg">Ready</div>
+</div>
+</div>
+
+<!-- Edit annotation modal -->
+<div id="editModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9999;justify-content:center;align-items:center" onclick="closeEditModal()">
+<div style="background:#fff;border-radius:10px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 4px 30px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:10px;cursor:default" onclick="event.stopPropagation()">
+<div style="font-size:15px;font-weight:600">✏️ Edit Annotation</div>
+<input type="hidden" id="editMaskId">
+<label style="font-size:12px;font-weight:600;color:#555">Instance ID <input type="text" id="editInstId" style="width:100%;margin-top:2px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px"></label>
+<label style="font-size:12px;font-weight:600;color:#555">Text (search term) <input type="text" id="editText" style="width:100%;margin-top:2px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px"></label>
+<label style="font-size:12px;font-weight:600;color:#555">Score <input type="number" id="editScore" step="0.001" min="0" max="1" style="width:100%;margin-top:2px;padding:5px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px"></label>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+<button class="btn btn-sm btn-outline" onclick="closeEditModal()">Cancel</button>
+<button class="btn btn-sm btn-a" onclick="saveAnnotation()" style="background:#7c3aed">Save</button>
+</div>
 </div>
 </div>
 
@@ -241,6 +265,7 @@ const state={
     showLabels:true,
     showMasks:true,
     highlightMaskId:null,
+    mergeMode:null, // null=off, [] = selected mask ids for merging
     // Alias mode (use alias as instance_id instead of search term)
     useAlias:true,
     fullscreenCanvas:false,  // when true, canvas fills entire viewport
@@ -945,7 +970,7 @@ async function loadImages(){
 async function loadImage(id){
     const d=await apiGet(`/api/image/${id}`);
     state.currentImageId=id;state.imageDataUrl=d.data_url;state.imgW=d.width;state.imgH=d.height;
-    const sc=Math.min(800/d.width,600/d.height);
+    const sc=Math.min(1040/d.width,780/d.height);
     canvas.width=Math.round(d.width*sc);canvas.height=Math.round(d.height*sc);
     state.minCanvasScale=sc;state.canvasZoom=1;
     state.masks=[];state.nextMaskId=0;state.counters={a:{},b:{},c:{},d:{}};state.currentBox=null;state.highlightMaskId=null;state.negativeBoxes=[];
@@ -993,7 +1018,8 @@ document.getElementById('runBtn').addEventListener('click',async()=>{
         else data=await apiPost('/api/segment-c',{image_id:state.currentImageId,text,box:state.currentBox,
             negative_boxes:state.negativeBoxes.length?state.negativeBoxes:undefined});
         const batchId=Date.now();
-        const aliasVal=document.getElementById('aliasInput').value.trim();
+        const aliasEl=mode==='a'?document.getElementById('aliasInputA'):document.getElementById('aliasInput');
+        const aliasVal=aliasEl?aliasEl.value.trim():'';
         const label=(state.useAlias&&aliasVal)?aliasVal:text;
         (data.masks||[]).forEach(m=>{
             state.masks.push({
@@ -1136,16 +1162,17 @@ function updateMaskList(){
         });
         // Click mask item to highlight (same as seg mode)
         container.querySelectorAll('.mask-item').forEach(el=>{
-            el.addEventListener('click',function(e){
-                if(e.target.closest('input')||e.target.closest('button'))return;
-                const id=parseInt(this.dataset.id);
-                highlightMask(id);
-            });
+        el.addEventListener('click',function(e){
+            if(e.target.closest('input')||e.target.closest('button'))return;
+            const id=parseInt(this.dataset.id);
+            if(state.mergeMode){selectForMerge(id);return;}
+            highlightMask(id);
         });
-        return;
-    }
+    });
+    return;
+}
 
-    // ====== SEGMENT MODE (existing) ======
+// ====== SEGMENT MODE (existing) ======
     const hasPending=state.masks.some(m=>!m.confirmed);
     const sorted=getSortedMasks();
     const confirmed=sorted.filter(m=>m.confirmed);
@@ -1159,22 +1186,28 @@ function updateMaskList(){
         const groups={};
         confirmed.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
         for(const [comp,items] of Object.entries(groups)){
+            const gid='c_'+comp.replace(/[^a-zA-Z0-9]/g,'_');
             html+=`<div style="margin:2px 0;padding-left:8px;border-left:2px solid #ddd">`;
-            html+=`<div style="font-size:10px;color:#888;padding:1px 0">${comp} (${items.length})</div>`;
+            html+=`<div style="font-size:10px;color:#888;padding:1px 0;cursor:pointer;user-select:none" onclick="toggleCollapse('${gid}')"><span>▼ </span>${comp} (${items.length})</div>`;
+            html+=`<div id="${gid}">`;
             items.forEach(m=>{html+=renderMaskItem(m);});
-            html+=`</div>`;
+            html+=`</div></div>`;
         }
         html+=`</div>`;
     }
     if(pending.length>0){
-        html+=`<div class="section-label">⏳ Pending (${pending.length})`;
+        html+=`<div class="section-label" style="cursor:pointer;user-select:none" onclick="toggleCollapse('pendingGroup')">
+            <span>▶ </span>⏳ Pending (${pending.length})</div>
+            <div id="pendingGroup">`;
         const groups={};
         pending.forEach(m=>{const k=m.text;if(!groups[k])groups[k]=[];groups[k].push(m);});
         for(const [comp,items] of Object.entries(groups)){
+            const gid='p_'+comp.replace(/[^a-zA-Z0-9]/g,'_');
             html+=`<div style="margin:2px 0;padding-left:8px;border-left:2px solid #2563eb">`;
-            html+=`<div style="font-size:10px;color:#2563eb;padding:1px 0">${comp} (${items.length})</div>`;
+            html+=`<div style="font-size:10px;color:#2563eb;padding:1px 0;cursor:pointer;user-select:none" onclick="toggleCollapse('${gid}')"><span>▼ </span>${comp} (${items.length})</div>`;
+            html+=`<div id="${gid}">`;
             items.forEach(m=>{html+=renderMaskItem(m);});
-            html+=`</div>`;
+            html+=`</div></div>`;
         }
         html+=`</div>`;
     }
@@ -1185,6 +1218,18 @@ function updateMaskList(){
             const id=parseInt(e.target.closest('.mask-item').dataset.id);
             const m=state.masks.find(x=>x.id===id);
             if(m){m.visible=e.target.checked;fullRedraw();}
+        });
+    });
+    container.querySelectorAll('.edit-anno-btn').forEach(btn=>{
+        btn.addEventListener('click',e=>{
+            e.stopPropagation();
+            editAnnotation(parseInt(btn.dataset.id));
+        });
+    });
+    container.querySelectorAll('.edit-poly-btn').forEach(btn=>{
+        btn.addEventListener('click',e=>{
+            e.stopPropagation();
+            polyEdit(parseInt(btn.dataset.id));
         });
     });
     container.querySelectorAll('.mask-del').forEach(btn=>{
@@ -1200,20 +1245,23 @@ function updateMaskList(){
         el.addEventListener('click',function(e){
             if(e.target.closest('.mask-actions')||e.target.closest('input'))return;
             const id=parseInt(this.dataset.id);
+            if(state.mergeMode){selectForMerge(id);return;}
             highlightMask(id);
         });
     });
     document.getElementById('pushBtn').style.display=hasPending?'inline-block':'none';
     document.getElementById('pushBtn').textContent=hasPending?`📌 Push All Pending (${pending.length})`:'📌 Push All Pending';
+    refreshBatchTypeSelect();
 }
 
-let _confirmedCollapsed=false;
+let _collapsed={};
 function toggleCollapse(id){
-    _confirmedCollapsed=!_confirmedCollapsed;
+    _collapsed[id]=!_collapsed[id];
     const el=document.getElementById(id);
+    if(!el)return;
+    el.classList.toggle('hidden',_collapsed[id]);
     const label=el.previousElementSibling;
-    if(_confirmedCollapsed){el.style.display='none';label.innerHTML=`<span>▶ </span>✅ Confirmed`;}
-    else{el.style.display='block';label.innerHTML=`<span>▼ </span>✅ Confirmed (${state.masks.filter(m=>m.confirmed).length})`;}
+    if(label){const s=label.querySelector('span');if(s)s.textContent=_collapsed[id]?'▶ ':'▼ ';}
 }
 
 function renderMaskItem(m){
@@ -1223,7 +1271,8 @@ function renderMaskItem(m){
     const warnStyle=m.overlapWarn?'border:2px solid #dc2626;background:#fef2f2;':'';
     const warnNote=m.overlapWarn&&m.overlapWith&&m.overlapWith.length>0
         ?`<div style="font-size:9px;color:#dc2626;margin-top:1px">⚠️ 与 ${m.overlapWith.map(o=>o.name).join(', ')} 重叠</div>`:'';
-    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}" style="${warnStyle}">
+    const mergeSel=state.mergeMode&&state.mergeMode.includes(m.id)?' merge-selected':'';
+    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}${mergeSel}" data-id="${m.id}" style="${warnStyle}">
         <input type="checkbox" ${checked} class="mask-vis" style="width:14px;height:14px;cursor:pointer;">
         <span class="color-dot" style="background:${m.color}"></span>
         <div class="mask-info">
@@ -1233,7 +1282,8 @@ function renderMaskItem(m){
             ${warnNote}
         </div>
         <div class="mask-actions">
-            ${m.mode==='D'?`<button class="edit-btn" data-id="${m.id}" title="Edit Polygon" onclick="polyEdit(${m.id})" style="background:none;border:1px solid #e5e7eb;border-radius:3px;cursor:pointer;font-size:10px;padding:1px 5px;margin-right:2px">✏️</button>`:''}
+            <button class="edit-anno-btn" data-id="${m.id}" title="Edit annotation" style="background:none;border:1px solid #e5e7eb;border-radius:3px;cursor:pointer;font-size:10px;padding:1px 5px">✏️</button>
+            ${m.mode==='D'?`<button class="edit-poly-btn" data-id="${m.id}" title="Edit Polygon" style="background:none;border:1px solid #e5e7eb;border-radius:3px;cursor:pointer;font-size:10px;padding:1px 5px">⬡</button>`:''}
             <button class="del-btn mask-del" data-id="${m.id}" title="Delete">🗑</button>
         </div>
     </div>`;
@@ -1248,6 +1298,98 @@ function highlightMask(id){
     fullRedraw();
     const m=state.masks.find(x=>x.id===id);
     if(m)status(`📍 ${m.instance_id} (score: ${m.score.toFixed(3)})`);
+}
+
+// =====================================================================
+// Edit annotation
+// =====================================================================
+function editAnnotation(id){
+    const m=state.masks.find(x=>x.id===id);
+    if(!m)return;
+    document.getElementById('editMaskId').value=id;
+    document.getElementById('editInstId').value=m.instance_id;
+    document.getElementById('editText').value=m.text;
+    document.getElementById('editScore').value=m.score;
+    document.getElementById('editModal').style.display='flex';
+}
+function closeEditModal(){
+    document.getElementById('editModal').style.display='none';
+}
+function saveAnnotation(){
+    const id=parseInt(document.getElementById('editMaskId').value);
+    const m=state.masks.find(x=>x.id===id);
+    if(!m)return;
+    m.instance_id=document.getElementById('editInstId').value.trim()||m.instance_id;
+    m.text=(document.getElementById('editText').value.trim()||m.text);
+    const ns=parseFloat(document.getElementById('editScore').value);
+    if(!isNaN(ns)&&ns>=0&&ns<=1)m.score=ns;
+    closeEditModal();
+    updateMaskList();
+    status(`✅ Updated ${m.instance_id}`);
+}
+
+// =====================================================================
+// Merge masks
+// =====================================================================
+function toggleMergeMode(){
+    state.mergeMode=state.mergeMode?null:[];
+    document.getElementById('mergeBtn').classList.toggle('hidden',!!state.mergeMode);
+    document.getElementById('mergeCancelBtn').classList.toggle('hidden',!state.mergeMode);
+    state.highlightMaskId=null;
+    updateMaskList();
+    status(state.mergeMode?'🔗 合并模式: 点击选择两个掩码':'');
+}
+function cancelMerge(){
+    state.mergeMode=null;
+    document.getElementById('mergeBtn').classList.remove('hidden');
+    document.getElementById('mergeCancelBtn').classList.add('hidden');
+    updateMaskList();
+    status('合并已取消');
+}
+function selectForMerge(id){
+    if(!state.mergeMode)return;
+    const idx=state.mergeMode.indexOf(id);
+    if(idx>=0){state.mergeMode.splice(idx,1);updateMaskList();return;}
+    if(state.mergeMode.length>=2){status('最多选择2个掩码');return;}
+    state.mergeMode.push(id);
+    updateMaskList();
+    if(state.mergeMode.length===2)mergeMasks();
+}
+function mergeMasks(){
+    const ids=state.mergeMode;if(!ids||ids.length<2){status('请选择2个掩码');return;}
+    const m1=state.masks.find(m=>m.id===ids[0]),m2=state.masks.find(m=>m.id===ids[1]);
+    if(!m1||!m2){status('掩码不存在');cancelMerge();return;}
+    // Decode both mask PNGs and compute union
+    const c=document.createElement('canvas');c.width=state.imgW;c.height=state.imgH;
+    const cx=c.getContext('2d');let loaded=0;
+    [m1,m2].forEach((m,idx)=>{
+        const img=new Image();
+        img.onload=()=>{
+            const tc=document.createElement('canvas');tc.width=state.imgW;tc.height=state.imgH;
+            const tctx=tc.getContext('2d');tctx.drawImage(img,0,0,state.imgW,state.imgH);
+            const d=tctx.getImageData(0,0,state.imgW,state.imgH).data;
+            const od=cx.getImageData(0,0,state.imgW,state.imgH);
+            for(let i=0;i<d.length;i+=4){
+                if(d[i]>128){od.data[i]=255;od.data[i+3]=255;}
+            }
+            cx.putImageData(od,0,0);
+            loaded++;
+            if(loaded===2){
+                const mergedData=c.toDataURL();
+                const mergedId=state.nextMaskId++;
+                state.masks.push({
+                    id:mergedId,instance_id:m1.instance_id,mode:m1.mode,text:m1.text,score:(m1.score+m2.score)/2,
+                    mask_data:mergedData,visible:true,box:null,color:m1.color,confirmed:false,
+                    batch:Date.now(),eval:{underSeg:false,overSeg:false,boundary:false,iou:null},
+                });
+                state.masks=state.masks.filter(m=>!ids.includes(m.id));
+                cancelMerge();
+                updateMaskList();fullRedraw();
+                status(`✅ 已合并 → ${m1.instance_id}`);
+            }
+        };
+        img.src=m.mask_data;
+    });
 }
 
 // =====================================================================
@@ -1271,6 +1413,29 @@ function hideByMode(modeLabel){
     });
     updateMaskList();fullRedraw();
     status(`Hidden Mode ${modeLabel.toUpperCase()} masks`);
+}
+function refreshBatchTypeSelect(){
+    const sel=document.getElementById('batchTypeSelect');
+    if(!sel)return;
+    const types=[...new Set(state.masks.map(m=>m.text))].sort();
+    const cur=sel.value;
+    sel.innerHTML='<option value="">—</option>'+types.map(t=>`<option value="${t}">${t}</option>`).join('');
+    if(types.includes(cur))sel.value=cur;
+}
+function hideByType(){
+    const t=document.getElementById('batchTypeSelect').value;
+    if(!t)return;
+    state.masks.forEach(m=>{if(m.text===t)m.visible=false;});
+    updateMaskList();fullRedraw();
+    status(`🙈 Hidden type: ${t}`);
+}
+function deleteByType(){
+    const t=document.getElementById('batchTypeSelect').value;
+    if(!t)return;
+    const count=state.masks.filter(m=>m.text===t).length;
+    state.masks=state.masks.filter(m=>m.text!==t);
+    updateMaskList();fullRedraw();
+    status(`🗑️ Deleted ${count} masks of type: ${t}`);
 }
 function hideConfirmed(){
     state.masks.forEach(m=>{if(m.confirmed)m.visible=false});
@@ -1308,6 +1473,12 @@ document.getElementById('exportBtn').addEventListener('click',async()=>{
 // Init
 // =====================================================================
 document.getElementById('sortSelect').addEventListener('change',()=>{updateMaskList();});
+let _maskPanelVisible=true;
+function toggleMaskPanel(){
+    _maskPanelVisible=!_maskPanelVisible;
+    document.getElementById('maskPanelToggle').textContent=_maskPanelVisible?'◀':'▶';
+    document.querySelectorAll('.mask-list-card>*:not(h3)').forEach(el=>el.classList.toggle('hidden',!_maskPanelVisible));
+}
 
 // =====================================================================
 // Full-size magnified view
@@ -1486,7 +1657,8 @@ function renderEvalMaskItem(m){
     const mi=m.eval.mislabel?'checked':'';
     const badgeClass=`mode-${m.mode.toLowerCase()}-badge`;
     const checked=m.visible?'checked':'';
-    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}" data-id="${m.id}">
+    const mergeSel=state.mergeMode&&state.mergeMode.includes(m.id)?' merge-selected':'';
+    return `<div class="mask-item${state.highlightMaskId===m.id?' highlighted':''}${mergeSel}" data-id="${m.id}">
         <input type="checkbox" ${checked} class="mask-vis" style="width:14px;height:14px;cursor:pointer;">
         <span class="color-dot" style="background:${m.color}"></span>
         <div class="mask-info" style="flex:1;min-width:0">
